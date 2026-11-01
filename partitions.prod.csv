@@ -1,0 +1,10 @@
+# ESP32-P4 · 32 MB Flash · **完整版**分区表
+# Name,     Type, SubType, Offset,   Size,  Flags
+# 说明（plan §4.5）：app 必须 ≥4M（LVGL + H.264 + Wi-Fi + USB 装不进 hello_p4 的 ~1M SINGLE_APP）。
+#   storage 是**片内** FATFS，保留给配置/资源/网页备份 —— **不作 MTP 卷**
+#   （完整版 MTP 只暴露 SD 卡一个卷，plan §4.5 已定案）。
+#   ⚠️ 探测期用的 partitions.csv 保持冻结不动（它把 storage 当 MTP 探测卷）。
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  4M,
+storage,    data, fat,     ,         8M,

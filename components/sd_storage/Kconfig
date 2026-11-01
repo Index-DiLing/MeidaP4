@@ -1,0 +1,127 @@
+menu "SD storage (SDMMC slot 0 + LDO + FATFS)"
+
+    config SD_STORAGE_MOUNT_POINT
+        string "FATFS mount point"
+        default "/sdcard"
+        help
+            SD 卡挂到 VFS 上的路径。**这是唯一的挂载点定义**：mtp_backend 只调
+            sd_storage_mount_point()，自己没有挂载点配置 —— 这样"FATFS 挂载路径"与
+            "MTP 卷注册路径"在编译期就必然是同一个值。
+
+    config SD_STORAGE_SDMMC_SLOT
+        int "SDMMC host slot"
+        default 0
+        range 0 1
+        help
+            Slot 0 = GPIO39~44（本板 TF 卡，专用 IOMUX 引脚）。
+            Slot 1 被 esp_hosted 的 SDIO 传输占用（CLK18/CMD19/D0~D3 14~17），不要选。
+
+    config SD_STORAGE_BUS_WIDTH
+        int "SDMMC bus width (bits)"
+        default 4
+        range 1 4
+        help
+            默认 4 位。注意别用 0（= 取该 slot 最大位宽 8 位，会占用 GPIO45~48）。
+
+    config SD_STORAGE_MAX_FREQ_KHZ
+        int "SDMMC clock (kHz)"
+        default 40000
+        help
+            plan §4.4 冻结值 40000 = SDMMC_FREQ_HIGHSPEED (40 MHz)。
+            调试降速用 20000 = SDMMC_FREQ_DEFAULT；10000 更保守。
+
+    config SD_STORAGE_INTERNAL_PULLUP
+        bool "Enable SDMMC_SLOT_FLAG_INTERNAL_PULLUP"
+        default y
+        help
+            plan §4.4 要求。关掉它需要板上有外部上拉。
+
+    config SD_STORAGE_PIN_CLK
+        int "SDMMC CLK GPIO"
+        default 43
+    config SD_STORAGE_PIN_CMD
+        int "SDMMC CMD GPIO"
+        default 44
+    config SD_STORAGE_PIN_D0
+        int "SDMMC D0 GPIO"
+        default 39
+    config SD_STORAGE_PIN_D1
+        int "SDMMC D1 GPIO"
+        default 40
+    config SD_STORAGE_PIN_D2
+        int "SDMMC D2 GPIO"
+        default 41
+    config SD_STORAGE_PIN_D3
+        int "SDMMC D3 GPIO"
+        default 42
+
+    config SD_STORAGE_LDO_ENABLE
+        bool "Power the SD card from the on-chip LDO regulator"
+        default y
+        help
+            ⚠️ plan §4.4 点名的**最容易踩的坑**：本板的 TF 卡由 ESP32-P4 片内 LDO
+            （LDO_VO4 = 通道 4）供电，**不 acquire 这个通道 SD 卡根本不会工作**。
+            只在外接稳压给 SD 供电的板子上才关掉它。
+
+            ESP32-P4 的 LDO 通道号是 1-based（1 = LDO_VO1 … 4 = LDO_VO4），
+            四个通道都可调压（ldo_ll.h: LDO_LL_ADJUSTABLE_CHAN_MASK = 0x0F）。
+
+    config SD_STORAGE_LDO_CHANNEL
+        int "On-chip LDO channel for the SD card"
+        depends on SD_STORAGE_LDO_ENABLE
+        default 4
+        range 1 4
+
+    config SD_STORAGE_LDO_VOLTAGE_MV
+        int "SD card VDD (mV)"
+        depends on SD_STORAGE_LDO_ENABLE
+        default 3300
+        range 1800 3300
+        help
+            3.3 V 标准 SD 电平。IDF 自带的 sd_pwr_ctrl_by_on_chip_ldo 在 P4 上同样用 3300 mV。
+
+    config SD_STORAGE_LDO_STABLE_DELAY_US
+        int "Delay after enabling the LDO before touching the card (us)"
+        depends on SD_STORAGE_LDO_ENABLE
+        default 1000
+        range 0 200000
+        help
+            给卡内的上电复位电路留时间。0 = 不等待。
+
+    config SD_STORAGE_MAX_FILES
+        int "Max simultaneously open files (FATFS)"
+        default 16
+        range 1 32
+        help
+            MTP 与设备内其它代码共用这个额度。MTP 浏览/复制时会同时打开多个文件。
+
+    config SD_STORAGE_ALLOC_UNIT_SIZE
+        int "FATFS allocation unit size (bytes, 0 = let FATFS choose)"
+        default 16384
+        range 0 65536
+
+    config SD_STORAGE_DISK_STATUS_CHECK
+        bool "Enable FATFS disk status check (detect card removal)"
+        default y
+        help
+            打开后 FATFS 在访问前会校验收卡状态，拔卡后 I/O 立刻返回错误而不是超时。
+            对本板 SDMMC 驱动成立（diskio_sdmmc 实现了 status 回调）。
+
+    config SD_STORAGE_FORMAT_IF_MOUNT_FAILED
+        bool "Format the card when it holds no usable FATFS"
+        default y
+        help
+            **只在"卡在、但读不到 FATFS"时**才格式化（ESP_FAIL 分支）；
+            卡根本不在（超时/无响应）时不会去格式化。
+            关掉它 = 遇到空卡/未格式化卡时只打错误日志，卷保持不可用。
+
+    config SD_STORAGE_WRITE_INFO_FILE
+        bool "Write MeidaP4-SD-INFO.txt into the card root at every boot"
+        default y
+        help
+            每次挂载成功后往卡根目录写一个小的信息文件（容量/时钟/挂载点/时间戳）。
+            两个作用：① 证据 —— 主机通过 MTP 能看到它，说明 MTP 卷就是这张卡；
+            ② 真机验收项"PC 通过 MTP 打开同一文件时 P4 侧仍能 fopen"需要一个已存在的文件。
+            格式化的卡上只会多这一个文件。
+
+endmenu

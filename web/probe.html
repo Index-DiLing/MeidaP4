@@ -1,0 +1,2276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeidaP4 WebUSB 探测页 (probe v0)</title>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1a1f27; --panel2:#212833; --line:#2e3746;
+    --fg:#dfe6f1; --dim:#93a1b5; --ok:#3ecf8e; --warn:#e8b84b; --err:#ef6b6b; --acc:#63a8ff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+    font:14px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  body{padding:16px 18px 60px;max-width:1180px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 4px}
+  h2{font-size:15px;margin:0 0 10px;color:var(--acc);border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:13px;margin:14px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .sub{color:var(--dim);font-size:12.5px;margin:0 0 14px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:14px 16px;margin:0 0 14px}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+    padding:6px 11px;font-size:13px;cursor:pointer;margin:2px 4px 2px 0;font-family:inherit}
+  button:hover:not(:disabled){border-color:var(--acc);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:#20406b;border-color:#2f5f9e}
+  button.danger{background:#4a2020;border-color:#7a3333}
+  input[type=number],input[type=text],select,textarea{
+    background:#0e1116;color:var(--fg);border:1px solid var(--line);border-radius:5px;
+    padding:4px 7px;font-size:13px;font-family:inherit}
+  textarea{width:100%;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px}
+  code,kbd{font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;
+    background:#0e1116;border:1px solid var(--line);border-radius:3px;padding:0 4px}
+  pre{margin:6px 0 0;background:#0e1116;border:1px solid var(--line);border-radius:6px;
+    padding:9px 11px;overflow:auto;max-height:340px;font-family:Consolas,"Cascadia Mono",monospace;
+    font-size:12px;white-space:pre-wrap;word-break:break-word}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;margin:6px 0}
+  th,td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:600}
+  .kv{display:grid;grid-template-columns:210px 1fr;gap:2px 12px;font-size:12.5px}
+  .kv .k{color:var(--dim)}
+  .kv .v{font-family:Consolas,"Cascadia Mono",monospace;word-break:break-all}
+  .row{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin:6px 0}
+  .row label{color:var(--dim);font-size:12.5px}
+  .badge{display:inline-block;border-radius:10px;padding:1px 9px;font-size:12px;font-weight:600}
+  .b-ok{background:#123a2a;color:var(--ok);border:1px solid #1f6b4a}
+  .b-warn{background:#3d3113;color:var(--warn);border:1px solid #7a6320}
+  .b-err{background:#3d1717;color:var(--err);border:1px solid #7a2f2f}
+  .b-dim{background:#232a35;color:var(--dim);border:1px solid var(--line)}
+  .banner{border-radius:8px;padding:11px 14px;margin:0 0 14px;border:1px solid;font-size:13px}
+  .banner.err{background:#3a1414;border-color:#8b3a3a;color:#ffd9d9}
+  .banner.warn{background:#3a3214;border-color:#8b7a3a;color:#ffeec9}
+  .banner.info{background:#14283a;border-color:#3a6b8b;color:#d9ecff}
+  .hidden{display:none !important}
+  .note{color:var(--dim);font-size:12px;margin:6px 0 0}
+  .mono{font-family:Consolas,"Cascadia Mono",monospace}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)} .dim{color:var(--dim)}
+  .logline{border-bottom:1px dotted #232a35;padding:1px 0}
+  .lr-err{color:var(--err)} .lr-warn{color:var(--warn)} .lr-ok{color:var(--ok)} .lr-info{color:var(--dim)}
+</style>
+</head>
+<body>
+
+<h1>MeidaP4 · WebUSB 探测页 <span class="badge b-dim">probe v0</span></h1>
+<p class="sub">
+  单文件 / 原生 JS / 零外部依赖 / 零构建。契约：<code>docs/probe-contract.md</code> §4 线协议 v0、§6 主机侧验收。
+  VID 固定 <code>0x303A</code>；模式 A PID <code>0x4001</code>（Vendor=IF0, EP 0x01/0x81 bulk）；
+  模式 B PID <code>0x4002</code>（IF0=MTP, IF1=Vendor, EP 0x03/0x83）。线协议无帧头，IN 侧会混入心跳行 <code>\nHB &lt;ms&gt;\n</code>。
+  <b>步骤：请求设备 → 打开 → 选择配置 → claim 接口 → 跑回环。</b>
+</p>
+
+<div id="fatal-error" class="banner err hidden"></div>
+<div id="env-secure-note" class="banner info hidden"></div>
+
+<!-- ============ 1. 环境自检 ============ -->
+<section id="sec-env">
+  <h2>1 · 环境自检（契约 §6.1）</h2>
+  <div class="kv">
+    <div class="k">isSecureContext</div><div class="v" id="env-isSecureContext">—</div>
+    <div class="k">location.protocol</div><div class="v" id="env-protocol">—</div>
+    <div class="k">location.href</div><div class="v" id="env-href">—</div>
+    <div class="k">navigator.usb 存在</div><div class="v" id="env-usb-api">—</div>
+    <div class="k">navigator.userAgent</div><div class="v" id="env-userAgent">—</div>
+    <div class="k">总体判定</div><div class="v" id="env-verdict">—</div>
+  </div>
+  <p class="note">
+    在 Chromium（Chrome / Edge）下 <b><code>file://</code> 属于安全上下文，<code>isSecureContext === true</code></b>，
+    因此直接双击本文件即可用 WebUSB，无需本地服务器。
+    <b><code>http://localhost</code> 与 <code>http://127.0.0.1</code> 也可以</b>（被当作可信来源）。
+    <b class="err"><code>http://192.168.x.x</code> 绝对不行</b>：那是普通明文的不可信来源，<code>isSecureContext === false</code>，
+    浏览器根本不会暴露 <code>navigator.usb</code>。这也是本页要证明的第一件事（合同 R1：<code>file://</code> 方案是否成立）。
+  </p>
+</section>
+
+<!-- ============ 2. 设备获取 ============ -->
+<section id="sec-device">
+  <h2>2 · 设备获取与描述符清单（契约 §6.2）</h2>
+  <div class="row">
+    <button class="primary" id="btn-request-device">请求设备 requestDevice(VID 0x303A)</button>
+    <button id="btn-list-authorized">列出已授权设备 getDevices()</button>
+    <button id="btn-forget">撤销授权 forget()</button>
+    <button class="danger" id="btn-reset">强制复位设备 device.reset()</button>
+  </div>
+  <div id="device-none" class="banner warn">
+    尚未获取设备。请插板并点击「请求设备 requestDevice(VID 0x303A)」。
+    若弹出的选择框里<b>看不到设备</b>，多半是固件缺 WebUSB BOS 平台能力或 <code>bcdUSB &lt; 0x0210</code>——判读见 <code>docs/host-verify.md</code>。
+  </div>
+  <div id="device-summary" class="hidden">
+    <h3>设备标识</h3>
+    <div class="kv">
+      <div class="k">vendorId</div><div class="v" id="dv-vendorId">—</div>
+      <div class="k">productId</div><div class="v" id="dv-productId">—</div>
+      <div class="k">productName</div><div class="v" id="dv-productName">—</div>
+      <div class="k">manufacturerName</div><div class="v" id="dv-manufacturerName">—</div>
+      <div class="k">serialNumber</div><div class="v" id="dv-serialNumber">—</div>
+      <div class="k">USB 版本 (bcdUSB)</div><div class="v" id="dv-usbVersion">—</div>
+      <div class="k">device 版本 (bcdDevice)</div><div class="v" id="dv-deviceVersion">—</div>
+      <div class="k">设备类/子类/协议</div><div class="v" id="dv-classTriple">—</div>
+      <div class="k">opened</div><div class="v" id="dv-opened">—</div>
+      <div class="k">当前配置 configuration</div><div class="v" id="dv-configValue">—</div>
+    </div>
+    <div class="row">
+      <button id="btn-open">打开 open()</button>
+      <button id="btn-close">关闭 close()</button>
+      <label>选择配置 selectConfiguration()
+        <select id="select-config"><option value="">（无）</option></select>
+      </label>
+      <button id="btn-select-config">执行</button>
+    </div>
+    <h3>接口分类（自动识别 MTP / Vendor）</h3>
+    <div id="interface-class-table"><p class="note">尚未读取。</p></div>
+  </div>
+  <h3>描述符全清单 configuration / interface / alternate / endpoint</h3>
+  <div class="row"><button id="btn-dump-desc">重新输出描述符清单</button></div>
+  <div id="desc-tree"><p class="note">尚未获取设备。</p></div>
+  <p class="note">
+    <b>注意</b>：BOS 描述符与 WebUSB 平台能力<b>无法从 JS 读取</b>——WebUSB 只暴露配置/接口/端点。
+    「设备能出现在 requestDevice 列表中」本身就是 WebUSB 平台能力存在的<b>间接证据</b>；BOS 原文只能用
+    <code>chrome://usb-internals</code> 或 USB 抓包确认（见 <code>docs/host-verify.md</code> §9）。
+  </p>
+</section>
+
+<!-- ============ 3. claimInterface ============ -->
+<section id="sec-claim">
+  <h2>3 · claimInterface（冒烟 A 的关键证据 · 契约 §6.3）</h2>
+  <div class="row">
+    <label>接口号 IF <select id="select-interface"><option value="">（先请求设备）</option></select></label>
+    <label>alternate <select id="select-alternate"><option value="">-</option></select></label>
+    <label>IN 端点 <select id="select-in-ep"><option value="">-</option></select></label>
+    <label>OUT 端点 <select id="select-out-ep"><option value="">-</option></select></label>
+  </div>
+  <div class="row">
+    <button class="primary" id="btn-claim">claimInterface()</button>
+    <button id="btn-release">releaseInterface()</button>
+  </div>
+  <div id="claim-result" class="banner info">尚未执行 claimInterface。</div>
+  <div class="kv">
+    <div class="k">err.name（原文）</div><div class="v" id="claim-error-name">—</div>
+    <div class="k">err.message（原文）</div><div class="v" id="claim-error-message">—</div>
+  </div>
+  <div id="claim-hint" class="note"></div>
+  <div id="claim-state" class="note"></div>
+  <p class="note">
+    失败判读速查：<code>SecurityError</code> → 该接口被<b>内核驱动</b>占用（Windows 没给它绑 <b>WinUSB</b>，而是挂了别的驱动或未匹配）；
+    <code>NetworkError</code> → 设备已断开/复位中；<code>NotFoundError</code> → 接口号或 alternate 不存在（模式 A/B 的 IF 号不同，见 §1）。
+    模式 B 下<b>绝不要</b> claim IF0（MTP 接口，由 <code>wpdmtp.sys</code> 占用）。
+  </p>
+</section>
+
+<!-- ============ 4. 回环 ============ -->
+<section id="sec-loop">
+  <h2>4 · bulk 回环测试（契约 §4 / §6.4）</h2>
+  <div class="row">
+    <label>数据量 <select id="select-size">
+      <option value="1024">1 KB</option>
+      <option value="65536">64 KB</option>
+      <option value="1048576" selected>1 MB</option>
+      <option value="custom">自定义…</option>
+    </select></label>
+    <label>自定义（字节）<input type="number" id="input-custom-size" value="4194304" min="1" step="1024" style="width:110px"></label>
+    <label>分块（字节，≤4096）<select id="select-chunk">
+      <option value="512">512</option>
+      <option value="1024">1024</option>
+      <option value="2048">2048</option>
+      <option value="4096" selected>4096</option>
+    </select></label>
+    <label>单块超时(ms) <input type="number" id="input-timeout" value="3000" min="100" step="100" style="width:80px"></label>
+    <label>用例总超时(ms) <input type="number" id="input-total-timeout" value="120000" min="1000" step="1000" style="width:95px"></label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="checkbox-exclude-lf" checked> 测试数据避开 0x0A（让心跳过滤无歧义，<b>推荐</b>）</label>
+    <label><input type="checkbox" id="checkbox-drain" checked> 测量前排空 IN、对齐到心跳行边界（<b>强烈推荐</b>，关掉可复现错位）</label>
+    <label><input type="checkbox" id="checkbox-autoreset" checked> 超时后自动 device.reset()</label>
+  </div>
+  <div class="row">
+    <button class="primary" id="btn-run-loopback">开始回环</button>
+    <button class="danger" id="btn-stop-loopback">停止回环</button>
+  </div>
+  <div id="loop-progress" class="note">就绪。</div>
+  <div class="kv">
+    <div class="k">一致字节数（= size − 失配）</div><div class="v" id="lb-bytes">—</div>
+    <div class="k">分块数</div><div class="v" id="lb-chunks">—</div>
+    <div class="k">逐字节比对</div><div class="v" id="lb-mismatch">—</div>
+    <div class="k">首处失配</div><div class="v" id="lb-first-mismatch">—</div>
+    <div class="k">IN 原始字节 rawInBytes</div><div class="v" id="lb-raw-in">—</div>
+    <div class="k">被剥离心跳字节 hbBytes</div><div class="v" id="lb-hb-bytes">—</div>
+    <div class="k">疑似残留 LF 行 strayLFlines</div><div class="v" id="lb-stray-lf">—</div>
+    <div class="k">位移 k = rawInBytes − size</div><div class="v" id="lb-k">—</div>
+    <div class="k">★ 验收判据 k − hbBytes</div><div class="v" id="lb-k-hb">—</div>
+    <div class="k">账目分解（surplus / carry / 无法解释）</div><div class="v" id="lb-unaccounted">—</div>
+    <div class="k">测量前排空</div><div class="v" id="lb-drain">—</div>
+    <div class="k">ZLP 次数 zeroLenReads</div><div class="v" id="lb-zlp">—</div>
+    <div class="k">过滤掉的心跳行</div><div class="v" id="lb-hb-filtered">—</div>
+    <div class="k">总耗时</div><div class="v" id="lb-elapsed">—</div>
+    <div class="k">吞吐量</div><div class="v" id="lb-throughput">—</div>
+    <div class="k">吞吐量(MiB/s)</div><div class="v" id="lb-mib">—</div>
+    <div class="k">每块 RTT min/avg/max</div><div class="v" id="lb-rtt-min">—</div>
+    <div class="k">RTT avg</div><div class="v" id="lb-rtt-avg">—</div>
+    <div class="k">RTT max</div><div class="v" id="lb-rtt-max">—</div>
+  </div>
+  <p class="note">
+    <b>流控（重要）</b>：设备侧缓冲只有约 12 KB（vendor RX/TX FIFO 各 4 KB + 8 KB stream buffer）。
+    所以本页<b>不做</b>「先 <code>transferOut(1MB)</code> 再 <code>transferIn</code>」——那样设备 FIFO 一满就一直 NAK，
+    <code>transferOut</code> 永不 resolve，直接死锁。正确做法是分块 ≤ 4 KB，且<b>先挂上 IN 读、再发 OUT</b> 形成流水线：
+    <code>const rd = transferIn(...); await transferOut(...); await rd;</code>。
+  </p>
+  <pre id="loop-log">（回环日志）</pre>
+</section>
+
+<!-- ============ 5. 心跳 ============ -->
+<section id="sec-hb">
+  <h2>5 · 设备心跳（契约 §4 / §6.5）</h2>
+  <div class="row">
+    <button class="primary" id="btn-read-heartbeat">读心跳（空闲 1 s 后设备主动发）</button>
+    <button id="btn-stop-heartbeat">停止读心跳</button>
+    <label>设备运行时间 <b class="mono" id="hb-uptime">—</b></label>
+    <label>收到心跳行 <b class="mono" id="hb-count">0</b></label>
+  </div>
+  <p class="note">
+    设备空闲 ≥ 1 s 时会主动在 IN 上发 <code>\nHB &lt;uptime_ms&gt;\n</code>。心跳与回环数据<b>共用同一条 IN 流</b>，
+    因此回环校验必须先剥离 HB 行再逐字节比对（本页 §4 已强制过滤）。
+    首包<b>可能是心跳也可能不是</b>，本页不假设 IN 第一段就是回环数据。
+  </p>
+  <div class="kv"><div class="k">最近原始字节（hex / ascii）</div><div class="v" id="hb-raw">—</div></div>
+  <pre id="hb-log">（心跳日志）</pre>
+</section>
+
+<!-- ============ 6. 模式 B 提示区 ============ -->
+<section id="sec-mtp">
+  <h2>6 · 模式 B（MTP + Vendor）提示区（契约 §6.6）</h2>
+  <div class="banner info">
+    <b>模式 B（PID <code>0x4002</code>）下：资源管理器里应同时出现名为 <code>MeidaP4 Storage</code> 的便携设备</b>，
+    可浏览片内 <code>storage</code> FATFS 卷里的文件（含 <code>PROBE.txt</code>）。
+    <br><b class="err">本页不要 claim MTP 接口（模式 B 的 IF0）</b>——它由 Windows 自带的
+    <code>wpdmtp.sys</code> 占用，claim 必然失败（通常抛 <code>SecurityError</code>）；
+    回环只能用 <b>Vendor 接口（模式 B = IF1，EP 0x03/0x83）</b>。
+  </div>
+  <div class="kv">
+    <div class="k">按键推断模式</div><div class="v" id="mtp-mode">—（尚未获取设备）</div>
+    <div class="k">接口分类结果</div><div class="v" id="mtp-detected">—</div>
+  </div>
+  <h3>怎么判断 MTP 与 WinUSB 各绑到哪个接口</h3>
+  <table>
+    <tr><th>看什么</th><th>MTP 那一路</th><th>Vendor 那一路</th></tr>
+    <tr>
+      <td>接口号（页面里读）</td>
+      <td>模式 B = <b>IF0</b>，class <code>0x06</code>（Still Image/PTP），alternate 里有 interrupt 事件端点 + bulk 数据端点</td>
+      <td>模式 B = <b>IF1</b>（模式 A = IF0），class <code>0xFF</code>（vendor-specific），bulk IN/OUT 同号（0x03/0x83）</td>
+    </tr>
+    <tr>
+      <td>设备管理器拓扑</td>
+      <td>顶点为 <code>MeidaP4 Probe</code>（复合父设备，<code>usbccgp</code>）→ 子节点 <b>便携设备</b> 里出现 <code>MeidaP4 Storage</code></td>
+      <td>同一父设备下的另一个子节点，类别 <b>通用串行总线设备</b>，名字含 <code>WebUSB</code>/<code>WinUSB</code></td>
+    </tr>
+    <tr>
+      <td>实例 ID 的 <code>&amp;MI_xx</code></td>
+      <td><code>USB\VID_303A&amp;PID_4002&amp;MI_00</code> → <b>MI_00 = 接口 0 = MTP</b></td>
+      <td><code>USB\VID_303A&amp;PID_4002&amp;MI_01</code> → <b>MI_01 = 接口 1 = Vendor</b>（模式 A 无 MI 或 MI_00）</td>
+    </tr>
+    <tr>
+      <td>驱动程序文件</td>
+      <td>属性→驱动程序→驱动程序文件里出现 <b><code>wpdmtp.sys</code></b>（WPD 走 UMDF，服务名一般是 <code>WUDFRd</code>）</td>
+      <td>属性→驱动程序→驱动程序文件里出现 <b><code>winusb.sys</code></b>，服务名 <code>WINUSB</code></td>
+    </tr>
+  </table>
+  <p class="note">
+    一行 PowerShell 看全（判据以 <b>Service</b> 为准，模式 B 应为 <code>WUDFRd</code> / <code>WINUSB</code> 两行）：
+    <br><code>Get-PnpDevice -PresentOnly | ? InstanceId -like 'USB\VID_303A*' | select Status,Class,FriendlyName,InstanceId | ft -Auto</code>
+    <br><code>Get-PnpDevice -PresentOnly | ? InstanceId -like 'USB\VID_303A*' | % { $_.InstanceId; (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Service).Data }</code>
+    <br>完整步骤与失败判读见 <code>docs/host-verify.md</code> §8。
+  </p>
+</section>
+
+<!-- ============ 7. 可选 GET_URL 探测 ============ -->
+<section id="sec-geturl">
+  <h2>7 · 可选：WebUSB GET_URL 探测（bRequest 0x02 / wIndex=1）</h2>
+  <p class="note">
+    这是唯一能从 JS <b>主动打到固件 vendor 控制请求</b>的标准手段，用来侧面确认 WebUSB 平台能力的
+    <code>bVendorCode</code> 分发是否正确（契约 §2 说 WebUSB=0x01 / MS OS=0x02）。
+    <b>不影响主验收</b>：若固件没实现 GET_URL，会返回 STALL 或失败，属正常，如实记录即可。
+  </p>
+  <div class="row"><button id="btn-get-url">发送 vendor IN 请求 (request=0x02, value=0, index=1, len=255)</button></div>
+  <pre id="geturl-result">（尚未执行）</pre>
+</section>
+
+<!-- ============ 8. 导出报告 ============ -->
+<section id="sec-report">
+  <h2>8 · 导出报告（契约 §6.7）</h2>
+  <div class="row">
+    <button class="primary" id="btn-export-report">导出报告（纯文本）</button>
+    <button id="btn-copy-report">复制到剪贴板</button>
+  </div>
+  <textarea id="report-output" rows="18" readonly placeholder="点「导出报告」生成纯文本，然后整段贴回会话。"></textarea>
+</section>
+
+<!-- ============ 9. 日志 ============ -->
+<section id="sec-log">
+  <h2>9 · 事件日志与未捕获异常</h2>
+  <div class="row">
+    <button id="btn-clear-log">清空日志</button>
+    <button id="btn-copy-log">复制日志</button>
+  </div>
+  <pre id="log-output">（日志）</pre>
+  <div id="untested-note" class="banner warn">
+    <b>未实测声明</b>：本页**尚未在任何真机上端到端跑过**（编写时无板）。所有数字字段在跑之前都是空。
+    等板子插上后由用户/Lead 按 <code>docs/host-verify.md</code> 逐步执行，并把 §10 的结果表回填到 <code>docs/probe-report.md</code>。
+    「零外部依赖」「无外部 URL」已静态自检（见 host-verify.md §0）。
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------- 常量
+  var VID = 0x303A;
+  var PID_MODE_A = 0x4001;
+  var PID_MODE_B = 0x4002;
+  var MAX_CHUNK = 4096;         // 设备侧 FIFO 很小，禁止一次发大块
+  var HB_READ_LEN = 64;
+
+  // ---------------------------------------------------------------- 状态
+  var APP = {
+    device: null,
+    claimedItf: null,
+    claimedAlt: null,
+    inEp: null,
+    outEp: null,
+    stopRequested: false,
+    hbStop: false,
+    loopRunning: false,
+    hbRunning: false,
+    inStreamDirty: false,    // 上一次读 IN 是否可能停在半行（心跳读取/中止后置位，排空成功后清零）
+    pending: 0,              // 仍在飞行、尚未 settle 的传输数（WebUSB 没有 cancelTransfer，无法取消）
+    deprecated: 0            // 因超时被放弃的挂起传输计数
+  };
+
+  // 导出报告用的结果仓库
+  var R = {
+    env: null,
+    device: null,
+    descDump: '',
+    itfTable: '',
+    claim: null,
+    loopback: null,
+    heartbeat: null,
+    geturl: null,
+    mtpHint: '',
+    errors: [],
+    note: '本页在真机上尚未端到端实测（编写时无板）。'
+  };
+
+  // ---------------------------------------------------------------- 小工具
+  function $(id) { return document.getElementById(id); }
+  function setText(id, s) { var e = $(id); if (e) { e.textContent = (s === undefined || s === null) ? '—' : String(s); } }
+  function setHtml(id, s) { var e = $(id); if (e) { e.innerHTML = s; } }
+  function show(id) { var e = $(id); if (e) { e.classList.remove('hidden'); } }
+  function hide(id) { var e = $(id); if (e) { e.classList.add('hidden'); } }
+  function hex(n, w) {
+    if (n === undefined || n === null || isNaN(n)) { return '—'; }
+    var s = (n >>> 0).toString(16).toUpperCase();
+    while (s.length < (w || 2)) { s = '0' + s; }
+    return '0x' + s;
+  }
+  function dec(n) { return (n === undefined || n === null || isNaN(n)) ? '—' : String(n); }
+  function bytesPerSecStr(bps) {
+    if (!isFinite(bps) || bps <= 0) { return '—'; }
+    return (bps / 1e6).toFixed(3) + ' MB/s (= 10^6 B/s)';
+  }
+  function fmtBytes(n) {
+    if (n === undefined || n === null || isNaN(n)) { return '—'; }
+    if (n < 1024) { return n + ' B'; }
+    if (n < 1048576) { return (n / 1024).toFixed(2) + ' KB (' + n + ' B)'; }
+    return (n / 1048576).toFixed(3) + ' MB (' + n + ' B)';
+  }
+  function ms(v) { return (v === null || v === undefined || isNaN(v)) ? '—' : v.toFixed(3) + ' ms'; }
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function fmtErr(e) {
+    if (e === null || e === undefined) { return '(无错误对象)'; }
+    if (typeof e === 'string') { return e; }
+    var n = e.name || '(无 name)';
+    var m = e.message || '(无 message)';
+    var extra = '';
+    if (e.isProbeTimeout) { extra = ' [本页超时]'; }
+    return n + ': ' + m + extra;
+  }
+  function errName(e) { return (e && e.name) ? e.name : '(无 name)'; }
+  function errMessage(e) { return (e && e.message) ? e.message : ((typeof e === 'string') ? e : '(无 message)'); }
+
+  // ---------------------------------------------------------------- 日志 / 异常
+  var LOG = [];
+  function logLine(kind, msg) {
+    var t = new Date().toISOString().substr(11, 12);
+    var line = '[' + t + '][' + kind + '] ' + msg;
+    LOG.push(line);
+    if (LOG.length > 3000) { LOG.splice(0, 500); }
+    var el = $('log-output');
+    if (el) { el.textContent = LOG.join('\n'); el.scrollTop = el.scrollHeight; }
+  }
+  function recordError(where, e) {
+    var s = where + ' -> ' + fmtErr(e);
+    R.errors.push(s);
+    logLine('err', s);
+    fatal(esc(s), true);
+  }
+  function fatal(html, append) {
+    var el = $('fatal-error');
+    if (!el) { return; }
+    el.classList.remove('hidden');
+    if (append) { el.innerHTML = el.innerHTML + '<br>' + html; }
+    else { el.innerHTML = html; }
+  }
+  window.addEventListener('error', function (ev) {
+    try {
+      var m = '未捕获异常: ' + (ev.message || '(no message)') +
+        ' @ ' + (ev.filename || '?') + ':' + (ev.lineno || '?') + ':' + (ev.colno || '?');
+      R.errors.push(m);
+      logLine('err', m);
+      fatal(esc(m), true);
+    } catch (x) { /* 连报错都失败也不能白屏 */ }
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    try {
+      var m = '未处理的 Promise 拒绝: ' + fmtErr(ev.reason);
+      R.errors.push(m);
+      logLine('err', m);
+      fatal(esc(m), true);
+    } catch (x) { /* ignore */ }
+  });
+
+  // 事件绑定：任何 handler 抛错都只能显示，不允许白屏
+  function on(id, handler, evt) {
+    var el = $(id);
+    if (!el) { logLine('warn', '页面缺少元素 #' + id); return; }
+    el.addEventListener(evt || 'click', function (ev) {
+      Promise.resolve()
+        .then(function () { return handler(ev); })
+        .catch(function (e) {
+          try { recordError('#' + id, e); } catch (x) { /* ignore */ }
+          refreshUi();
+        });
+    });
+  }
+  // 供内部 await 使用的包装（handler 里调用，异常向上冒泡给 on）
+  function needDevice() {
+    if (!APP.device) { throw new Error('还没有设备：请先点「请求设备 requestDevice」'); }
+    return APP.device;
+  }
+  function needOpen() {
+    var d = needDevice();
+    if (!d.opened) { throw new Error('设备尚未打开：请先点「打开 open()」'); }
+    return d;
+  }
+  function needEp() {
+    if (APP.inEp === null || APP.outEp === null) {
+      throw new Error('还没选定 IN/OUT 端点：请先在 §3 里选接口与端点');
+    }
+  }
+
+  // ---------------------------------------------------------------- 超时包装
+  function withTimeout(promise, timeoutMs, label) {
+    var timer = null;
+    var t = new Promise(function (_, rej) {
+      timer = setTimeout(function () {
+        var e = new Error('等待 ' + label + ' 超过 ' + timeoutMs + ' ms 未完成');
+        e.name = 'ProbeTimeoutError';
+        e.isProbeTimeout = true;
+        rej(e);
+      }, timeoutMs);
+    });
+    return Promise.race([promise, t]).then(function (v) {
+      clearTimeout(timer); return v;
+    }, function (e) {
+      clearTimeout(timer);
+      if (e && e.isProbeTimeout) { APP.deprecated++; }
+      throw e;
+    });
+  }
+
+  // 跟踪"仍在飞行"的传输数。WebUSB 没有 cancelTransfer，超时后那个 promise 无法取消，
+  // 它会继续挂在端点上、在下一个用例里偷走 IN 字节 —— 这就是跨用例泄漏的传输层形态。
+  // 因此用 APP.pending 显式记账：用例开始前若 pending>0，必须先 reset() 回收。
+  function trackTransfer(p) {
+    APP.pending++;
+    return p.then(function (v) { APP.pending--; return v; },
+      function (e) { APP.pending--; throw e; });
+  }
+
+  // ---------------------------------------------------------------- 心跳过滤器
+  // 线协议无帧头；设备心跳是 "\nHB <uptime_ms>\n"。
+  // 默认让测试数据避开 0x0A，于是 IN 流里任何 0x0A 都只可能来自心跳，过滤无歧义。
+  // 若用户允许 0x0A（raw 模式），这里仍按同样规则剥离，但结果可能误判，页面会标注。
+  //
+  // ⚠ 跨用例泄漏是"偏移 0 失配"的真凶：若本状态机残留着上一轮的半行（carry 非空），
+  //   下一用例的第一个 0x0A 会去闭合那个陈旧残片，把 "\nH" 当成数据吐出来 → 整体错位。
+  //   因此每个用例开始前必须调用 reset() 把所有状态与计数清零（见 runLoopback）。
+  function createHbFilter() {
+    var carry = new Uint8Array(0);
+    var hbList = [];
+    var hbBytes = 0;      // 被完整剥离的心跳行占用的原始字节数（含前后 \n）
+    var strayLF = 0;      // 不构成心跳行、被当作数据吐出去的 0x0A 个数（疑似残留/错位）
+    function matchAt(buf, start) {
+      var n = buf.length;
+      if (buf[start] !== 0x0A) { return { state: 'no' }; }
+      var lit = [0x48, 0x42, 0x20]; // 'H','B',' '
+      var i = start + 1, k;
+      for (k = 0; k < 3; k++) {
+        if (i >= n) { return { state: 'prefix' }; }
+        if (buf[i] !== lit[k]) { return { state: 'no' }; }
+        i++;
+      }
+      var digits = '';
+      for (;;) {
+        if (i >= n) { return { state: 'prefix' }; }
+        var c = buf[i];
+        if (c === 0x0A) {
+          if (digits.length === 0) { return { state: 'no' }; }
+          return { state: 'match', ms: Number(digits), end: i + 1 };
+        }
+        if (c < 0x30 || c > 0x39) { return { state: 'no' }; }
+        digits += String.fromCharCode(c);
+        if (digits.length > 12) { return { state: 'no' }; }
+        i++;
+      }
+    }
+    function push(chunk) {
+      var buf;
+      if (carry.length) {
+        buf = new Uint8Array(carry.length + chunk.length);
+        buf.set(carry, 0);
+        buf.set(chunk, carry.length);
+      } else {
+        buf = chunk;
+      }
+      var parts = [];
+      var i = 0, start = 0, holdFrom = -1;
+      while (i < buf.length) {
+        if (buf[i] !== 0x0A) { i++; continue; }
+        var r = matchAt(buf, i);
+        if (r.state === 'match') {
+          if (i > start) { parts.push(buf.subarray(start, i)); }
+          hbList.push(r.ms);
+          hbBytes += (r.end - i);
+          i = r.end;
+          start = i;
+          continue;
+        }
+        if (r.state === 'prefix') { holdFrom = i; break; }
+        // state==='no'：这个 0x0A 不构成完整心跳行 → 会被当作数据吐给上层。
+        // 这正是"错位"的指纹，单独计数上报。
+        strayLF++;
+        i++;
+      }
+      if (holdFrom >= 0) {
+        if (holdFrom > start) { parts.push(buf.subarray(start, holdFrom)); }
+        carry = buf.slice(holdFrom);
+      } else {
+        if (buf.length > start) { parts.push(buf.subarray(start)); }
+        carry = new Uint8Array(0);
+      }
+      return parts;
+    }
+    // 兜底：把扣在 carry 里、迟迟等不到后续字节的片段当数据放行。
+    // 只在 raw 模式（测试数据允许 0x0A）下才可能用到；默认的 LF-free 载荷不会走到这里。
+    function flush() {
+      if (!carry.length) { return []; }
+      var c = carry;
+      carry = new Uint8Array(0);
+      return [c];
+    }
+    // 全部状态清零。hbList 原地清空以保持外部持有的引用有效。
+    function reset() {
+      carry = new Uint8Array(0);
+      hbList.length = 0;
+      hbBytes = 0;
+      strayLF = 0;
+    }
+    return {
+      push: push,
+      flush: flush,
+      reset: reset,
+      hbList: hbList,
+      hbBytes: function () { return hbBytes; },
+      strayLF: function () { return strayLF; },
+      carryLen: function () { return carry.length; }
+    };
+  }
+
+  // ---------------------------------------------------------------- 载荷生成
+  function makePayload(size, excludeLF, seed) {
+    var buf = new Uint8Array(size);
+    var s = (seed >>> 0) || 0x12345678;
+    var i, b;
+    for (i = 0; i < size; i++) {
+      s = (s ^ (s << 13)) >>> 0;
+      s = (s ^ (s >>> 17)) >>> 0;
+      s = (s ^ (s << 5)) >>> 0;
+      b = s & 0xFF;
+      if (excludeLF && b === 0x0A) { b = 0x0B; }
+      buf[i] = b;
+    }
+    return buf;
+  }
+
+  // ---------------------------------------------------------------- 环境自检
+  function renderEnv() {
+    var proto = String(location.protocol || '');
+    var secure = (typeof window.isSecureContext === 'boolean') ? window.isSecureContext : null;
+    var hasUsb = !!(navigator && navigator.usb);
+    setText('env-isSecureContext', String(secure));
+    setText('env-protocol', proto || '(空)');
+    setText('env-href', String(location.href));
+    setText('env-usb-api', hasUsb ? '存在 (navigator.usb)' : '不存在');
+    setText('env-userAgent', String(navigator.userAgent || '—'));
+
+    var verdict, cls, note = '';
+    if (!hasUsb && secure === false) {
+      verdict = '不可用：非安全上下文，navigator.usb 被隐藏';
+      cls = 'b-err';
+      note = '当前来源不是安全上下文（' + proto + '）。请改用 file:// 或 http://localhost 打开本页。' +
+        '注意 http://192.168.x.x 这类局域网明文地址永远不是安全上下文。';
+    } else if (!hasUsb) {
+      verdict = '不可用：navigator.usb 不存在';
+      cls = 'b-err';
+      note = '这个浏览器没有 WebUSB（Firefox/Safari 不支持）。必须用 Windows 上的 Chrome 或 Edge。';
+    } else if (secure === true) {
+      verdict = '可用：安全上下文 + navigator.usb 存在';
+      cls = 'b-ok';
+      if (proto === 'file:') {
+        note = '已确认：file:// 在 Chromium 下 isSecureContext === true —— 契约 R1 的「file:// 方案成立」这一半得到证实。';
+      }
+    } else {
+      verdict = '可疑：navigator.usb 存在但不是安全上下文';
+      cls = 'b-warn';
+    }
+    setHtml('env-verdict', '<span class="badge ' + cls + '">' + esc(verdict) + '</span>');
+
+    var sn = $('env-secure-note');
+    if (sn) {
+      if (note) {
+        sn.classList.remove('hidden');
+        sn.className = 'banner ' + (cls === 'b-err' ? 'err' : (cls === 'b-warn' ? 'warn' : 'info'));
+        sn.innerHTML = '<b>环境判定</b>：' + esc(note);
+      } else {
+        sn.classList.add('hidden');
+      }
+    }
+    R.env = {
+      isSecureContext: secure,
+      protocol: proto,
+      href: String(location.href),
+      hasUsb: hasUsb,
+      userAgent: String(navigator.userAgent || ''),
+      verdict: verdict,
+      note: note
+    };
+    logLine('info', '环境自检: isSecureContext=' + secure + ' protocol=' + proto + ' navigator.usb=' + hasUsb);
+  }
+
+  // ---------------------------------------------------------------- 接口分类
+  function activeAlt(itf) {
+    if (itf.alternate) { return itf.alternate; }
+    if (itf.alternates && itf.alternates.length) { return itf.alternates[0]; }
+    return null;
+  }
+  function classifyAlt(alt) {
+    if (!alt) { return { text: '(无 alternate)', kind: 'unknown' }; }
+    var c = alt.interfaceClass;
+    if (c === 0xFF) { return { text: 'Vendor-specific (0xFF) — WebUSB 回环候选', kind: 'vendor' }; }
+    if (c === 0x06) { return { text: 'Still Image / PTP (0x06) — 疑似 MTP，不要 claim', kind: 'mtp' }; }
+    if (c === 0x08) { return { text: 'Mass Storage (0x08)', kind: 'msc' }; }
+    if (c === 0x03) { return { text: 'HID (0x03)', kind: 'other' }; }
+    if (c === 0x0A || c === 0x0B) { return { text: 'CDC Data (0x0A) — 可能是 NCM 预留', kind: 'other' }; }
+    if (c === 0x02) { return { text: 'CDC Control (0x02)', kind: 'other' }; }
+    return { text: 'class ' + hex(c), kind: 'other' };
+  }
+
+  function dumpDescriptors(dev) {
+    var L = [];
+    L.push('Device  VID=' + hex(dev.vendorId, 4) + ' PID=' + hex(dev.productId, 4));
+    L.push('        productName="' + (dev.productName || '') + '" manufacturerName="' + (dev.manufacturerName || '') +
+      '" serialNumber="' + (dev.serialNumber || '') + '"');
+    L.push('        bcdUSB=' + dev.usbVersionMajor + '.' + dev.usbVersionMinor + '.' + dev.usbVersionSubminor +
+      '  bcdDevice=' + dev.deviceVersionMajor + '.' + dev.deviceVersionMinor + '.' + dev.deviceVersionSubminor);
+    L.push('        bDeviceClass/SubClass/Protocol=' + hex(dev.deviceClass) + '/' + hex(dev.deviceSubclass) + '/' + hex(dev.deviceProtocol));
+    L.push('        opened=' + dev.opened + '  claimed(any)=' + (dev.configuration ? '见下' : '未配置'));
+    var cfgs = dev.configurations || [];
+    L.push('Configurations: ' + cfgs.length + ' 个（当前 configuration=' + (dev.configuration ? dev.configuration.configurationValue : 'null') + '）');
+    var i, j, k;
+    for (i = 0; i < cfgs.length; i++) {
+      var cfg = cfgs[i];
+      L.push('');
+      L.push('  Configuration ' + cfg.configurationValue +
+        '  name="' + (cfg.configurationName || '') + '"  interfaces=' + (cfg.interfaces ? cfg.interfaces.length : 0));
+      var itfs = cfg.interfaces || [];
+      for (j = 0; j < itfs.length; j++) {
+        var itf = itfs[j];
+        L.push('    Interface ' + itf.interfaceNumber + '  claimed=' + itf.claimed +
+          '  alternates=' + (itf.alternates ? itf.alternates.length : 0));
+        var alts = itf.alternates || [];
+        for (k = 0; k < alts.length; k++) {
+          var alt = alts[k];
+          var act = itf.alternate && alt.alternateSetting === itf.alternate.alternateSetting;
+          L.push('      Alternate ' + alt.alternateSetting + (act ? ' [当前]' : '') +
+            '  class/sub/proto=' + hex(alt.interfaceClass) + '/' + hex(alt.interfaceSubclass) + '/' + hex(alt.interfaceProtocol) +
+            '  name="' + (alt.interfaceName || '') + '"' +
+            '  -> ' + classifyAlt(alt).text);
+          var eps = alt.endpoints || [];
+          L.push('        endpoints=' + eps.length);
+          var m;
+          for (m = 0; m < eps.length; m++) {
+            var ep = eps[m];
+            L.push('          EP 0x' + hex(ep.endpointNumber).substr(2) + ' ' + String(ep.direction).toUpperCase() +
+              '  type=' + ep.type + '  packetSize=' + ep.packetSize +
+              '  (endpointNumber=' + ep.endpointNumber + ', 地址=' +
+              hex((ep.direction === 'in') ? (0x80 | ep.endpointNumber) : ep.endpointNumber) + ')');
+          }
+        }
+      }
+    }
+    if (!cfgs.length) { L.push('  (设备未返回任何 configuration —— 可能未配置，试「选择配置 selectConfiguration()」)'); }
+    return L.join('\n');
+  }
+
+  function renderInterfaceTable(dev) {
+    var rows = ['<table><tr><th>IF</th><th>alt</th><th>class/sub/proto</th><th>方向</th><th>EP 号</th><th>type</th><th>packetSize</th><th>判定</th></tr>'];
+    var cfgs = (dev.configuration ? [dev.configuration] : (dev.configurations || []));
+    var i, j, k, m;
+    for (i = 0; i < cfgs.length; i++) {
+      var itfs = cfgs[i].interfaces || [];
+      for (j = 0; j < itfs.length; j++) {
+        var itf = itfs[j];
+        var alts = itf.alternates || [];
+        for (k = 0; k < alts.length; k++) {
+          var alt = alts[k];
+          var cl = classifyAlt(alt);
+          var eps = alt.endpoints || [];
+          if (!eps.length) {
+            rows.push('<tr><td>' + itf.interfaceNumber + '</td><td>' + alt.alternateSetting + '</td><td>' +
+              hex(alt.interfaceClass) + '/' + hex(alt.interfaceSubclass) + '/' + hex(alt.interfaceProtocol) +
+              '</td><td>-</td><td>-</td><td>-</td><td>-</td><td>' + esc(cl.text) + '</td></tr>');
+          }
+          for (m = 0; m < eps.length; m++) {
+            var ep = eps[m];
+            rows.push('<tr><td>' + (m === 0 ? itf.interfaceNumber : '') + '</td><td>' + (m === 0 ? alt.alternateSetting : '') +
+              '</td><td>' + (m === 0 ? (hex(alt.interfaceClass) + '/' + hex(alt.interfaceSubclass) + '/' + hex(alt.interfaceProtocol)) : '') +
+              '</td><td>' + String(ep.direction).toUpperCase() + '</td><td>' + hex(ep.endpointNumber) +
+              '</td><td>' + ep.type + '</td><td>' + ep.packetSize + '</td><td>' + (m === 0 ? esc(cl.text) : '') + '</td></tr>');
+          }
+        }
+      }
+    }
+    rows.push('</table>');
+    if (rows.length === 2) { return '<p class="note">没有可显示的接口（设备可能未配置）。</p>'; }
+    return rows.join('');
+  }
+
+  function classifyMode(pid) {
+    if (pid === PID_MODE_A) { return '模式 A（PID 0x4001，单 Vendor：Vendor=IF0, EP 0x01/0x81）；MTP 关闭，资源管理器里不应有 MeidaP4 Storage。'; }
+    if (pid === PID_MODE_B) { return '模式 B（PID 0x4002，MTP+Vendor 复合：IF0=MTP, IF1=Vendor, Vendor EP 0x03/0x83）。'; }
+    return '未知 PID ' + hex(pid, 4) + '（契约只定义 0x4001/0x4002）。';
+  }
+
+  function fillInterfaceSelectors(dev) {
+    var cfgs = (dev.configuration ? [dev.configuration] : (dev.configurations || []));
+    var found = [];
+    var i, j, k;
+    for (i = 0; i < cfgs.length; i++) {
+      var itfs = cfgs[i].interfaces || [];
+      for (j = 0; j < itfs.length; j++) {
+        var itf = itfs[j];
+        var alts = itf.alternates || [];
+        for (k = 0; k < alts.length; k++) {
+          var alt = alts[k];
+          var cl = classifyAlt(alt);
+          var eps = alt.endpoints || [];
+          var m, bulkIn = null, bulkOut = null, anyIn = null, anyOut = null;
+          for (m = 0; m < eps.length; m++) {
+            var ep = eps[m];
+            if (ep.direction === 'in') { if (anyIn === null) { anyIn = ep; } if (ep.type === 'bulk' && bulkIn === null) { bulkIn = ep; } }
+            else { if (anyOut === null) { anyOut = ep; } if (ep.type === 'bulk' && bulkOut === null) { bulkOut = ep; } }
+          }
+          found.push({
+            itf: itf.interfaceNumber,
+            alt: alt.alternateSetting,
+            kind: cl.kind,
+            text: cl.text,
+            inEp: bulkIn ? bulkIn.endpointNumber : (anyIn ? anyIn.endpointNumber : null),
+            outEp: bulkOut ? bulkOut.endpointNumber : (anyOut ? anyOut.endpointNumber : null),
+            inIsBulk: !!bulkIn,
+            outIsBulk: !!bulkOut
+          });
+        }
+      }
+    }
+    var itfSel = $('select-interface');
+    var altSel = $('select-alternate');
+    if (itfSel) {
+      itfSel.innerHTML = '';
+      if (!found.length) { itfSel.innerHTML = '<option value="">（无接口）</option>'; }
+      var seen = {};
+      for (i = 0; i < found.length; i++) {
+        if (seen[found[i].itf]) { continue; }
+        seen[found[i].itf] = 1;
+        var o = document.createElement('option');
+        o.value = String(found[i].itf);
+        o.textContent = 'IF ' + found[i].itf;
+        itfSel.appendChild(o);
+      }
+    }
+    window.__FOUND = found;
+    syncAltSelect();
+    // 自动挑第一个 vendor-specific 接口（并排除 MTP）
+    var pick = null;
+    for (i = 0; i < found.length; i++) { if (found[i].kind === 'vendor') { pick = found[i]; break; } }
+    if (pick) {
+      if (itfSel) { itfSel.value = String(pick.itf); }
+      syncAltSelect();
+      if (altSel) { altSel.value = String(pick.alt); }
+      syncEpSelect();
+      logLine('info', '自动选中 vendor 接口 IF' + pick.itf + ' alt' + pick.alt +
+        '（IN EP ' + dec(pick.inEp) + ' / OUT EP ' + dec(pick.outEp) + '）');
+      if (pick.kind !== 'vendor') { logLine('warn', '自动选中的接口不是 0xFF，请人工确认。'); }
+    }
+    return found;
+  }
+
+  function currentIfAlt() {
+    var itfSel = $('select-interface');
+    var altSel = $('select-alternate');
+    var itf = itfSel && itfSel.value !== '' ? parseInt(itfSel.value, 10) : null;
+    var alt = altSel && altSel.value !== '' ? parseInt(altSel.value, 10) : null;
+    return { itf: itf, alt: alt };
+  }
+  function syncAltSelect() {
+    var found = window.__FOUND || [];
+    var cur = currentIfAlt();
+    var altSel = $('select-alternate');
+    if (!altSel) { return; }
+    altSel.innerHTML = '';
+    if (cur.itf === null) { altSel.innerHTML = '<option value="">-</option>'; syncEpSelect(); return; }
+    var i, n = 0;
+    for (i = 0; i < found.length; i++) {
+      if (found[i].itf !== cur.itf) { continue; }
+      var o = document.createElement('option');
+      o.value = String(found[i].alt);
+      o.textContent = 'alt ' + found[i].alt + ' · ' + found[i].text;
+      altSel.appendChild(o);
+      n++;
+    }
+    if (!n) { altSel.innerHTML = '<option value="">-</option>'; }
+    syncEpSelect();
+  }
+  function curEntry() {
+    var cur = currentIfAlt();
+    var found = window.__FOUND || [];
+    var i;
+    for (i = 0; i < found.length; i++) {
+      if (found[i].itf === cur.itf && found[i].alt === cur.alt) { return found[i]; }
+    }
+    return null;
+  }
+  function syncEpSelect() {
+    var e = curEntry();
+    var inSel = $('select-in-ep');
+    var outSel = $('select-out-ep');
+    function fill(sel, val, label) {
+      if (!sel) { return; }
+      sel.innerHTML = '';
+      if (val === null || val === undefined) { sel.innerHTML = '<option value="">-</option>'; return; }
+      var o = document.createElement('option');
+      o.value = String(val);
+      o.textContent = label + ' ' + hex(val);
+      sel.appendChild(o);
+      sel.value = String(val);
+    }
+    if (e) {
+      fill(inSel, e.inEp, 'IN EP');
+      fill(outSel, e.outEp, 'OUT EP');
+      APP.inEp = e.inEp;
+      APP.outEp = e.outEp;
+    } else {
+      fill(inSel, null); fill(outSel, null);
+      APP.inEp = null; APP.outEp = null;
+    }
+  }
+
+  // ---------------------------------------------------------------- 设备获取
+  function adoptDevice(dev) {
+    APP.device = dev;
+    APP.claimedItf = null;
+    APP.claimedAlt = null;
+    APP.inEp = null;
+    APP.outEp = null;
+    hide('device-none');
+    show('device-summary');
+    renderDeviceSummary(dev);
+    refreshUi();
+    logLine('ok', '获得设备 VID=' + hex(dev.vendorId, 4) + ' PID=' + hex(dev.productId, 4) +
+      ' productName="' + (dev.productName || '') + '"');
+  }
+
+  function renderDeviceSummary(dev) {
+    setText('dv-vendorId', hex(dev.vendorId, 4));
+    setText('dv-productId', hex(dev.productId, 4));
+    setText('dv-productName', dev.productName || '(空)');
+    setText('dv-manufacturerName', dev.manufacturerName || '(空)');
+    setText('dv-serialNumber', dev.serialNumber || '(空)');
+    var usbV = dev.usbVersionMajor + '.' + dev.usbVersionMinor + '.' + dev.usbVersionSubminor;
+    var bcd = dev.usbVersionMajor * 256 + dev.usbVersionMinor * 16 + dev.usbVersionSubminor;
+    var usbNote = (bcd >= 0x210) ? ' ≥ 0x0210 ✔（Windows 才会取 BOS/MS OS 描述符）'
+      : ' <b class="err">&lt; 0x0210 ✘（Windows 不会取 BOS/MS OS 描述符，WebUSB 平台能力可能失效）</b>';
+    setHtml('dv-usbVersion', esc(usbV) + ' (bcdUSB=' + hex(bcd, 4) + ')' + usbNote);
+    setText('dv-deviceVersion', dev.deviceVersionMajor + '.' + dev.deviceVersionMinor + '.' + dev.deviceVersionSubminor);
+    var triple = hex(dev.deviceClass) + ' / ' + hex(dev.deviceSubclass) + ' / ' + hex(dev.deviceProtocol);
+    if (dev.deviceClass === 0xEF && dev.deviceSubclass === 0x02 && dev.deviceProtocol === 0x01) {
+      triple += ' ✔ (Misc/IAD，复合设备，期望值)';
+    } else {
+      triple += ' ⚠ (契约期望 0xEF/0x02/0x01；不匹配则 Windows 不会按接口分发)';
+    }
+    setText('dv-classTriple', triple);
+    setText('dv-opened', String(dev.opened));
+    setText('dv-configValue', dev.configuration ? String(dev.configuration.configurationValue) : 'null（未配置）');
+
+    var cfgSel = $('select-config');
+    if (cfgSel) {
+      cfgSel.innerHTML = '';
+      var cfgs = dev.configurations || [];
+      var i;
+      if (!cfgs.length) { cfgSel.innerHTML = '<option value="">（无）</option>'; }
+      for (i = 0; i < cfgs.length; i++) {
+        var o = document.createElement('option');
+        o.value = String(cfgs[i].configurationValue);
+        o.textContent = 'config ' + cfgs[i].configurationValue + (cfgs[i].configurationName ? ' · ' + cfgs[i].configurationName : '');
+        cfgSel.appendChild(o);
+      }
+      if (dev.configuration) { cfgSel.value = String(dev.configuration.configurationValue); }
+    }
+
+    setText('desc-tree', dumpDescriptors(dev));
+    R.descDump = dumpDescriptors(dev);
+    var tbl = renderInterfaceTable(dev);
+    setHtml('interface-class-table', tbl);
+    R.itfTable = tbl.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    var found = fillInterfaceSelectors(dev);
+    var kinds = found.map(function (f) { return 'IF' + f.itf + '/alt' + f.alt + '=' + f.kind; }).join(', ');
+    setText('mtp-mode', classifyMode(dev.productId));
+    setText('mtp-detected', kinds || '(无)');
+
+    R.device = {
+      vendorId: hex(dev.vendorId, 4),
+      productId: hex(dev.productId, 4),
+      productName: dev.productName || '',
+      manufacturerName: dev.manufacturerName || '',
+      serialNumber: dev.serialNumber || '',
+      bcdUSB: hex(bcd, 4),
+      bcdDevice: dev.deviceVersionMajor + '.' + dev.deviceVersionMinor + '.' + dev.deviceVersionSubminor,
+      classTriple: hex(dev.deviceClass) + '/' + hex(dev.deviceSubclass) + '/' + hex(dev.deviceProtocol),
+      opened: dev.opened,
+      configuration: dev.configuration ? dev.configuration.configurationValue : null,
+      modeGuess: classifyMode(dev.productId),
+      interfaceKinds: kinds
+    };
+    R.mtpHint = classifyMode(dev.productId) + '\n接口分类: ' + (kinds || '(无)');
+  }
+
+  async function requestDevice() {
+    if (!navigator.usb) { throw new Error('navigator.usb 不存在：请用 Chrome/Edge 在 file:// 或 http://localhost 下打开本页'); }
+    logLine('info', 'requestDevice(filters=[{vendorId:' + hex(VID, 4) + '}]) …');
+    var dev = await navigator.usb.requestDevice({ filters: [{ vendorId: VID }] });
+    if (!dev) { throw new Error('requestDevice 返回空（用户取消或没有匹配设备）'); }
+    adoptDevice(dev);
+  }
+  async function listAuthorized() {
+    if (!navigator.usb) { throw new Error('navigator.usb 不存在'); }
+    var list = await navigator.usb.getDevices();
+    logLine('info', 'getDevices() 返回 ' + list.length + ' 个已授权设备');
+    var i;
+    for (i = 0; i < list.length; i++) {
+      logLine('info', '  [' + i + '] VID=' + hex(list[i].vendorId, 4) + ' PID=' + hex(list[i].productId, 4) +
+        ' "' + (list[i].productName || '') + '" opened=' + list[i].opened);
+    }
+    if (!list.length) {
+      logLine('warn', '没有已授权设备。file:// 来源下授权可能不持久，请重新 requestDevice。');
+      return;
+    }
+    var pick = null;
+    for (i = 0; i < list.length; i++) { if (list[i].vendorId === VID) { pick = list[i]; break; } }
+    adoptDevice(pick || list[0]);
+  }
+  async function openDevice() {
+    var d = needDevice();
+    if (d.opened) { logLine('info', '设备已打开，跳过 open()'); }
+    else { await d.open(); logLine('ok', 'open() 成功'); }
+    if (!d.configuration) {
+      var cfgs = d.configurations || [];
+      if (cfgs.length) {
+        logLine('warn', 'configuration 为 null，自动 selectConfiguration(' + cfgs[0].configurationValue + ')');
+        await d.selectConfiguration(cfgs[0].configurationValue);
+        logLine('ok', 'selectConfiguration 成功');
+      }
+    }
+    renderDeviceSummary(d);
+    refreshUi();
+  }
+  async function closeDevice() {
+    var d = needDevice();
+    if (!d.opened) { logLine('info', '设备本就未打开'); return; }
+    if (APP.claimedItf !== null) {
+      try { await d.releaseInterface(APP.claimedItf); APP.claimedItf = null; logLine('ok', '关闭前释放了接口'); }
+      catch (e) { logLine('warn', '关闭前释放接口失败: ' + fmtErr(e)); }
+    }
+    await d.close();
+    logLine('ok', 'close() 成功');
+    renderDeviceSummary(d);
+    refreshUi();
+  }
+  async function selectConfig() {
+    var d = needOpen();
+    var sel = $('select-config');
+    if (!sel || sel.value === '') { throw new Error('没有可选的 configuration'); }
+    var v = parseInt(sel.value, 10);
+    await d.selectConfiguration(v);
+    logLine('ok', 'selectConfiguration(' + v + ') 成功');
+    R.device = R.device || {};
+    R.device.configuration = v;
+    renderDeviceSummary(d);
+    refreshUi();
+  }
+
+  // ---------------------------------------------------------------- 复位
+  async function forceReset(why) {
+    var d = needDevice();
+    logLine('warn', 'device.reset() 强制复位：' + why);
+    var before = APP.claimedItf;
+    APP.claimedItf = null;
+    APP.claimedAlt = null;
+    try {
+      await d.reset();
+      logLine('ok', 'reset() 返回。注意：复位后设备被取消配置、所有 claim 失效、挂起传输全部 rejected，需要重新 selectConfiguration + claimInterface。');
+    } catch (e) {
+      logLine('err', 'reset() 失败（设备可能已重新枚举）: ' + fmtErr(e));
+      R.errors.push('device.reset() -> ' + fmtErr(e));
+    }
+    try {
+      if (!d.configuration && d.configurations && d.configurations.length) {
+        await d.selectConfiguration(d.configurations[0].configurationValue);
+        logLine('ok', 'reset 后重新 selectConfiguration(' + d.configurations[0].configurationValue + ')');
+      }
+    } catch (e2) {
+      logLine('warn', 'reset 后 selectConfiguration 失败: ' + fmtErr(e2));
+    }
+    try { renderDeviceSummary(d); } catch (e3) { logLine('warn', 'reset 后刷新界面失败: ' + fmtErr(e3)); }
+    if (before !== null) {
+      setText('claim-result', '复位已释放接口（原 claim IF' + before + '）');
+    }
+    refreshUi();
+  }
+
+  // ---------------------------------------------------------------- claim
+  function hintForClaimError(e) {
+    var n = errName(e);
+    if (n === 'SecurityError') {
+      return '<b>SecurityError 判读</b>：该接口被内核驱动占用 —— Windows <b>没有</b>给它绑 <b>WinUSB</b>（' +
+        '多半是 WCID / MS OS 2.0 描述符没生效，或接口号选错了 MTP 那一路）。' +
+        '处置：① 设备管理器看该接口的驱动是不是 winusb.sys；② 模式 B 请改选 IF1；③ 兜底用 Zadig 手动装 WinUSB。';
+    }
+    if (n === 'NetworkError') {
+      return '<b>NetworkError 判读</b>：设备已断开或正在复位。检查是否插稳、是否刚 reset()、dmesg/monitor 是否见掉线。';
+    }
+    if (n === 'NotFoundError') {
+      return '<b>NotFoundError 判读</b>：接口号/alternate 不存在。模式 A 只有 IF0；模式 B 是 IF0(MTP)+IF1(Vendor)；' +
+        '请对照 §2 的接口清单重选。';
+    }
+    return '未归类的错误名 <code>' + esc(n) + '</code>：请把 err.name 原文贴回会话，并查 chrome://device-log。';
+  }
+
+  async function doClaim() {
+    var d = needOpen();
+    var cur = currentIfAlt();
+    if (cur.itf === null) { throw new Error('还没选接口号'); }
+    var ent = curEntry();
+    if (ent && ent.kind === 'mtp') {
+      var warnMsg = '警告：IF' + cur.itf + ' 分类为 ' + ent.text + '。按契约 §6.6，本页不应 claim MTP 接口，' +
+        '预期会失败并抛 SecurityError（被 wpdmtp.sys 占用）。仍继续执行以采集证据。';
+      logLine('warn', warnMsg);
+      setHtml('claim-hint', warnMsg);
+    }
+    var iface = d.configuration ? findInterface(d.configuration, cur.itf) : null;
+    if (!iface) { throw new Error('当前配置里找不到接口 IF' + cur.itf + '（先 selectConfiguration 试试）'); }
+    if (iface.claimed) {
+      logLine('warn', 'IF' + cur.itf + ' 已被本页面 claim 过，先 release 再 claim');
+      await d.releaseInterface(cur.itf);
+    }
+    logLine('info', 'claimInterface(' + cur.itf + ') …');
+    try {
+      await d.claimInterface(cur.itf);
+      APP.claimedItf = cur.itf;
+      APP.claimedAlt = cur.alt;
+      setHtml('claim-result', '<span class="badge b-ok">claimInterface SUCCESS</span> IF' + cur.itf +
+        '（alt ' + dec(cur.alt) + '）已独占。可以跑回环了。');
+      setText('claim-error-name', '(无异常)');
+      setText('claim-error-message', '(无异常)');
+      setHtml('claim-hint', '');
+      R.claim = { ok: true, itf: cur.itf, alt: cur.alt, errName: null, errMessage: null };
+      logLine('ok', 'claimInterface(' + cur.itf + ') 成功');
+      if (cur.alt !== null && cur.alt !== 0) {
+        try {
+          await d.selectAlternateInterface(cur.itf, cur.alt);
+          logLine('ok', 'selectAlternateInterface(' + cur.itf + ',' + cur.alt + ') 成功');
+        } catch (e) {
+          logLine('warn', 'selectAlternateInterface 失败（可能 alt=0 无需切换）: ' + fmtErr(e));
+        }
+      }
+    } catch (e) {
+      // 失败也必须把 err.name / err.message 原文打出来 —— 冒烟 A 的关键证据
+      APP.claimedItf = null;
+      var nm = errName(e);
+      var ms = errMessage(e);
+      setHtml('claim-result', '<span class="badge b-err">claimInterface FAILED</span> IF' + cur.itf +
+        ' —— err.name=' + esc(nm) + '，err.message=' + esc(ms));
+      setText('claim-error-name', nm);
+      setText('claim-error-message', ms);
+      setHtml('claim-hint', hintForClaimError(e));
+      R.claim = { ok: false, itf: cur.itf, alt: cur.alt, errName: nm, errMessage: ms };
+      R.errors.push('claimInterface(' + cur.itf + ') -> ' + nm + ': ' + ms);
+      logLine('err', 'claimInterface(' + cur.itf + ') 失败: ' + nm + ': ' + ms);
+      throw e;   // 交给 on() 统一显示，但不阻断页面
+    }
+    refreshUi();
+  }
+  function findInterface(cfg, itfNo) {
+    var itfs = cfg.interfaces || [];
+    var i;
+    for (i = 0; i < itfs.length; i++) { if (itfs[i].interfaceNumber === itfNo) { return itfs[i]; } }
+    return null;
+  }
+  async function doRelease() {
+    var d = needOpen();
+    var cur = currentIfAlt();
+    var target = (APP.claimedItf !== null) ? APP.claimedItf : cur.itf;
+    if (target === null) { throw new Error('没有可释放的接口'); }
+    await d.releaseInterface(target);
+    APP.claimedItf = null;
+    APP.claimedAlt = null;
+    logLine('ok', 'releaseInterface(' + target + ') 成功');
+    setHtml('claim-result', '<span class="badge b-dim">已释放</span> IF' + target);
+    refreshUi();
+  }
+
+  async function doGetUrl() {
+    var d = needOpen();
+    logLine('info', 'controlTransferIn vendor request=0x02 value=0 index=1 len=255 …');
+    var res = await withTimeout(trackTransfer(d.controlTransferIn({
+      requestType: 'vendor', recipient: 'device',
+      request: 0x02, value: 0x0000, index: 0x0001
+    }, 255)), 3000, 'controlTransferIn(GET_URL)');
+    var out = 'status=' + res.status + '\n';
+    if (res.data && res.data.byteLength) {
+      var v = new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
+      var hexs = [], ascii = '', i;
+      for (i = 0; i < v.length; i++) { hexs.push(hex(v[i]).substr(2)); ascii += (v[i] >= 32 && v[i] < 127) ? String.fromCharCode(v[i]) : '.'; }
+      out += 'len=' + v.length + '\nhex=' + hexs.join(' ') + '\nascii=' + ascii + '\n';
+      // WebUSB URL 描述符：bLength, bDescriptorType(0x03), bScheme, UTF8 URL
+      if (v.length > 3 && v[1] === 0x03) {
+        out += '识别为 WebUSB URL Descriptor，bScheme=' + v[2] + ' (0= http://, 1= https://, 255= 无 scheme)，URL=' +
+          String.fromCharCode.apply(null, Array.prototype.slice.call(v, 3)) + '\n';
+      }
+    } else { out += '(无数据)\n'; }
+    setText('geturl-result', out);
+    R.geturl = out;
+    logLine('ok', 'GET_URL 返回 status=' + res.status);
+  }
+
+  // ---------------------------------------------------------------- 回环
+  function selectedSize() {
+    var sel = $('select-size');
+    if (sel && sel.value === 'custom') {
+      var v = parseInt($('input-custom-size').value, 10);
+      if (!v || v < 1) { throw new Error('自定义大小无效'); }
+      return v;
+    }
+    return sel ? parseInt(sel.value, 10) : 1048576;
+  }
+  function selectedChunk() {
+    var v = parseInt($('select-chunk').value, 10);
+    if (!v || v < 1) { v = 4096; }
+    if (v > MAX_CHUNK) {
+      logLine('warn', '分块 ' + v + ' > ' + MAX_CHUNK + '，为防设备 FIFO 死锁强制降到 ' + MAX_CHUNK + '（设备缓冲仅约 12 KB）');
+      v = MAX_CHUNK;
+    }
+    return v;
+  }
+  function autoTotalTimeout(size) {
+    return Math.max(30000, Math.ceil(size / 1024) * 120);
+  }
+
+  // 单块流水线：**先把 IN 读挂上（立即发起 transferIn），再发 OUT**，最后一起等。
+  // 顺序不能反：设备 vendor RX/TX FIFO 只有约 12 KB（各 4 KB + 8 KB stream buffer），
+  // 若先 await transferOut(大块) 再去读 IN，FIFO 满了设备会一直 NAK，
+  // transferOut 永不 resolve —— 直接死锁。
+  async function echoChunkPipelined(chunk, ctx, timeoutMs) {
+    var rdFilter = ctx.filter;
+    var acc = new Uint8Array(chunk.length);
+    var accLen = 0;
+    var flushedOnce = false;
+
+    // ① surplus 结转：把本块用不完的数据字节留给下一块，绝不丢弃。
+    //    结构上 surplus 通常恒为 0（每次 transferIn 请求的长度 == 本块还差多少，
+    //    设备不可能返回超过请求长度的字节），但这里是页面里**唯一**能让字节凭空消失的
+    //    地方，所以必须显式结转 + 用不变量断言兜住。
+    function consumeSurplus() {
+      if (!ctx.surplus.length || accLen >= chunk.length) { return; }
+      var take = Math.min(ctx.surplus.length, chunk.length - accLen);
+      acc.set(ctx.surplus.subarray(0, take), accLen);
+      accLen += take;
+      ctx.delivered += take;
+      ctx.surplus = (take >= ctx.surplus.length) ? new Uint8Array(0) : ctx.surplus.slice(take);
+    }
+
+    function appendParts(parts) {
+      var k, p, take;
+      for (k = 0; k < parts.length; k++) {
+        p = parts[k];
+        ctx.partsIn += p.length;
+        if (accLen >= chunk.length) {
+          // 本块已满 → 余下全部结转到下一块
+          var merged = new Uint8Array(ctx.surplus.length + p.length);
+          merged.set(ctx.surplus, 0);
+          merged.set(p, ctx.surplus.length);
+          ctx.surplus = merged;
+          continue;
+        }
+        take = Math.min(p.length, chunk.length - accLen);
+        acc.set(p.subarray(0, take), accLen);
+        accLen += take;
+        ctx.delivered += take;
+        if (take < p.length) { ctx.surplus = p.slice(take); }
+      }
+      // 不变量：过滤器吐出的数据字节 == 已交付给各块的字节 + 结转余量
+      ctx.invariantChecked++;
+      if (ctx.partsIn !== ctx.delivered + ctx.surplus.length) {
+        ctx.invariantViolations++;
+        logLine('err', 'surplus 不变量被破坏：partsIn=' + ctx.partsIn +
+          ' delivered=' + ctx.delivered + ' surplus=' + ctx.surplus.length);
+      }
+    }
+
+    consumeSurplus();
+
+    // ② 立刻发起第一次 transferIn（下面 outP 之前）
+    var readP = (async function () {
+      // 收养排空阶段超时留下的那个挂起读：必须先用掉它，否则它会与下面新发的
+      // transferIn 并发抢同一端点、偷走第一个块的回环数据。
+      if (ctx.leftoverRead) {
+        var lr = ctx.leftoverRead;
+        ctx.leftoverRead = null;
+        var lres = null;
+        try {
+          lres = await lr;
+        } catch (le) {
+          logLine('warn', '收养的排空读以异常结束（可忽略）: ' + fmtErr(le));
+        }
+        if (lres && lres.data && lres.data.byteLength) {
+          var lv = new Uint8Array(lres.data.buffer, lres.data.byteOffset, lres.data.byteLength);
+          ctx.rawInBytes += lv.length;
+          appendParts(rdFilter.push(lv));
+          consumeSurplus();
+        } else if (lres) {
+          ctx.zeroLenReads++;   // 收养到的也是个 0 字节完成（ZLP）→ 同样按合法事件记账
+        }
+      }
+      while (accLen < chunk.length) {
+        // 用例总超时是唯一的最终兜底（runLoopback 主循环里也检查一次）
+        if (ctx.deadline && nowMs() > ctx.deadline) {
+          var te = new Error('用例总超时到期（' + ctx.deadlineMs + ' ms）—— 中止本用例');
+          te.name = 'ProbeTimeoutError';
+          te.isProbeTimeout = true;
+          throw te;
+        }
+        var want = chunk.length - accLen;
+        var res;
+        try {
+          res = await withTimeout(trackTransfer(APP.device.transferIn(APP.inEp, want)), timeoutMs,
+            'transferIn(EP ' + hex(APP.inEp) + ')');
+        } catch (e) {
+          // raw 模式兜底：尾部若有个 0x0A 被过滤器当成"还没收完的心跳行"扣住，
+          // 会一直等不到数据 → 这里放行一次，避免死等。默认 LF-free 载荷不会走到这里。
+          if (e && e.isProbeTimeout && !flushedOnce && rdFilter.carryLen() > 0) {
+            flushedOnce = true;
+            var heldN = rdFilter.carryLen();
+            appendParts(rdFilter.flush());
+            consumeSurplus();
+            logLine('warn', 'raw 模式：把过滤器扣住的 ' + heldN + ' 字节当数据放行（可能误判心跳，请对照 hb-raw）');
+            continue;
+          }
+          throw e;
+        }
+        if (res.status !== 'ok') {
+          var se = new Error('transferIn status=' + res.status + '（设备 STALL/异常，非 ZLP）');
+          se.name = 'ProbeTransferStatusError';
+          throw se;
+        }
+        // ★ 0 字节结果是**合法的 ZLP（零长度包）**，不是错误，绝不能因此中止用例。
+        // 设备侧写出的长度恰为 max packet(512) 的整数倍、且写完流就空了时，TinyUSB 会补一个 ZLP
+        // （tu_edpt_stream_write_zlp_if_needed 那类逻辑）；WebUSB 把它作为一次独立的
+        // 0 字节 transferIn 完成返回。ZLP 不携带数据 → 不计入 rawInBytes / hbBytes，
+        // 不消耗 want，继续读下一次即可（用例总超时 + 自旋上限兜底）。
+        // 这正解释了"1 KB 可以、超过 4 KB 就不行"：1 KB 那次请求长度大于实际可用 →
+        // 收到短包即完成，不需要 ZLP；而正好填满请求长度的 4096 块会触发 ZLP。
+        if (!res.data || res.data.byteLength === 0) {
+          ctx.zeroLenReads++;
+          if (ctx.zeroLenReads === 1 || ctx.zeroLenReads % 64 === 0) {
+            logLine('info', '收到 ZLP（0 字节 transferIn），累计 ' + ctx.zeroLenReads +
+              ' 次 —— 属正常，继续读（不带数据，不计入 rawInBytes）');
+          }
+          if (ctx.zeroLenReads > ctx.maxZeroLenReads) {
+            var zs = new Error('累计收到 ' + ctx.zeroLenReads + ' 次 0 字节 transferIn，超过上限 ' +
+              ctx.maxZeroLenReads + '：怀疑设备只发 ZLP 不再给数据（防自旋保护）');
+            zs.name = 'ProbeZeroLenSpinError';
+            throw zs;
+          }
+          continue;
+        }
+        var view = new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
+        ctx.rawInBytes += view.length;
+        appendParts(rdFilter.push(view));
+        consumeSurplus();
+      }
+      return acc;
+    })();
+
+    // ③ 紧接着发 OUT（同一个同步块内发起，两者并行在 USB 栈里跑）
+    var outP = withTimeout(trackTransfer(APP.device.transferOut(APP.outEp, chunk)), timeoutMs,
+      'transferOut(EP ' + hex(APP.outEp) + ')');
+
+    var both = await Promise.all([outP, readP]);
+    return { out: both[0], got: both[1] };
+  }
+
+  // ---------------------------------------------------------------- 测量前排空（drain / prime）
+  // 设备只要"已挂载且无人读 IN"就每秒无条件发一次 \nHB <ms>\n，会积满设备侧 FIFO
+  // （host-usb 实测 ≈4 KB / 374 行）。带着积压开测有两个致命后果：
+  //   ① 积压的开头可能是"半行"，剥离器识别不出 → 那些字节被当成 payload 数据；
+  //   ② 于是整个 IN 流从偏移 0 开始位移 k 字节，k 恰好等于积压字节数
+  //      （用户那次 ≈4098 B，表现为"首处失配在偏移 0、只有 1/256 字节偶然对上"）。
+  // 所以每个用例开始前必须把 IN 读到"行边界 + 刚消费过一个完整心跳行"。
+  // 这里用**独立的丢弃用过滤器**，其字节绝不并入测量期的 rawInBytes / hbBytes 计数。
+  async function drainIn(opt) {
+    var t0 = nowMs();
+    var f = createHbFilter();
+    var reads = 0, bytes = 0, hbLines = 0, strayLF = 0;
+    var lastReadHadHb = false;
+    var reason = 'budget';
+    var aligned = false;
+    var leftoverRead = null;   // 首个读就超时时留下的那个挂起读，交给测量阶段"收养"
+    for (;;) {
+      if (APP.stopRequested) { reason = 'stop'; break; }
+      if (bytes >= opt.maxBytes) { reason = 'maxBytes'; break; }
+      if (nowMs() - t0 >= opt.maxMs) { reason = 'maxMs'; break; }
+      // 行边界 + 刚消费过完整心跳行 ⇒ 流的起点对齐，可以开测
+      if (reads >= opt.minReads && f.carryLen() === 0 && lastReadHadHb) {
+        aligned = true;
+        reason = 'alignedAfterHb';
+        break;
+      }
+      var res;
+      var rawReadP = null;
+      try {
+        rawReadP = trackTransfer(APP.device.transferIn(APP.inEp, opt.readLen));
+        res = await withTimeout(rawReadP, opt.readTimeoutMs, 'transferIn(排空)');
+      } catch (e) {
+        if (e && e.isProbeTimeout) {
+          if (bytes === 0) {
+            // 首个读就超时且一个字节都没读到 ⇒ 设备侧 FIFO 是空的、没有任何积压，
+            // 流起点即行边界（设备只在整行边界写入）→ 可以直接开测。
+            // 这个超时的读不能丢（没有 cancelTransfer，丢了会并发偷字节）→ 收养给测量阶段。
+            reason = 'emptyFifoNoHb';
+            aligned = true;
+            leftoverRead = rawReadP;
+          } else {
+            reason = 'readTimeout';
+          }
+          break;
+        }
+        throw e;
+      }
+      if (!res.data || res.data.byteLength === 0) { reason = 'emptyRead'; break; }
+      var view = new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
+      var hbBefore = f.hbList.length;
+      f.push(view);
+      bytes += view.length;
+      reads++;
+      hbLines = f.hbList.length;
+      strayLF = f.strayLF();
+      lastReadHadHb = (f.hbList.length > hbBefore);
+    }
+    return {
+      reads: reads,
+      bytes: bytes,
+      hbLines: hbLines,
+      hbBytes: f.hbBytes(),
+      strayLF: strayLF,
+      aligned: aligned,
+      carryLeft: f.carryLen(),
+      reason: reason,
+      leftoverRead: leftoverRead,
+      elapsedMs: Number((nowMs() - t0).toFixed(1))
+    };
+  }
+
+  // 每个回环用例的开场：① 回收上一用例残留的挂起传输 ② 测量前排空
+  // 返回 { aborted, drain, drainSkipped, pendingAtStart, recovered }
+  async function loopbackPreflight(pushLog, opt) {
+    var out = { aborted: null, drain: null, drainSkipped: null, pendingAtStart: APP.pending, recovered: false, leftoverRead: null };
+
+    // ① 跨用例泄漏防护（传输层）：仍在飞行的传输会在本次偷走 IN 字节 → 必须先 reset 回收
+    if (out.pendingAtStart > 0) {
+      pushLog('⚠ 本用例开始时仍有 ' + out.pendingAtStart + ' 个传输在飞行（上一用例或心跳读取的残留）。' +
+        'WebUSB 没有 cancelTransfer，无法取消 → 调用 device.reset() 回收；否则本次读数必然错位。');
+      R.errors.push('用例开始前存在 ' + out.pendingAtStart + ' 个未结束的挂起传输（已用 reset 回收）');
+      var wereClaimed = APP.claimedItf;
+      await forceReset('回收上一用例残留的挂起传输');
+      out.recovered = true;
+      if (wereClaimed !== null && APP.device && APP.device.opened) {
+        try {
+          await APP.device.claimInterface(wereClaimed);
+          APP.claimedItf = wereClaimed;
+          logLine('ok', 'reset 后重新 claimInterface(' + wereClaimed + ') 成功');
+        } catch (e2) {
+          logLine('err', 'reset 后重新 claim 失败: ' + fmtErr(e2));
+          R.errors.push('reset 后重新 claim(' + wereClaimed + ') -> ' + fmtErr(e2));
+          out.aborted = 'reset 回收后重新 claimInterface 失败，请手工重新 claim 再跑';
+          return out;
+        }
+      }
+      if (APP.pending > 0) {
+        out.aborted = 'reset 之后仍有 ' + APP.pending + ' 个传输在飞行，拒绝在未对齐的流上测量';
+        pushLog('✘ ' + out.aborted);
+        return out;
+      }
+    }
+
+    // ② 测量前排空（对齐到行边界）
+    if (opt.drainEnabled) {
+      out.drain = await drainIn({
+        readLen: 4096, readTimeoutMs: 2500, minReads: 1, maxBytes: 262144, maxMs: 4000
+      });
+      var dr = out.drain;
+      pushLog('测量前排空：读 ' + dr.reads + ' 次 / ' + dr.bytes + ' B，其中完整心跳行 ' + dr.hbLines +
+        ' 行（' + dr.hbBytes + ' B），残留 LF ' + dr.strayLF + '，carry 残留 ' + dr.carryLeft +
+        ' B，对齐=' + (dr.aligned ? '是' : '否') + '（' + dr.reason + '），耗时 ' + dr.elapsedMs + ' ms。' +
+        '【这些字节全部丢弃，不计入 rawInBytes】' +
+        '（用例开始时 IN 流脏标记=' + APP.inStreamDirty + '）');
+      if (!dr.aligned) {
+        out.aborted = '排空失败：' + dr.reason + '（读到 ' + dr.bytes + ' B / carry 残留 ' + dr.carryLeft +
+          ' B），无法对齐到心跳行边界 → 拒绝在未对齐的 IN 流上测量';
+        pushLog('✘ ' + out.aborted);
+        R.errors.push(out.aborted);
+        // 排空超时留下的那个读还挂在端点上。同一端点不允许两个在飞行读，而且它会在
+        // 下一个用例里偷走字节 → 立刻 reset 回收，**绝不留下悬空读**。
+        if (APP.pending > 0) {
+          var wcAligned = APP.claimedItf;
+          pushLog('排空失败仍有 ' + APP.pending + ' 个传输在飞行 → device.reset() 回收悬空读');
+          await forceReset('排空失败后回收悬空读，避免同端点并发读');
+          out.recovered = true;
+          if (wcAligned !== null && APP.device && APP.device.opened) {
+            try {
+              await APP.device.claimInterface(wcAligned);
+              APP.claimedItf = wcAligned;
+              logLine('ok', '回收后重新 claimInterface(' + wcAligned + ') 成功');
+            } catch (e3) {
+              logLine('err', '回收后重新 claim 失败: ' + fmtErr(e3));
+              R.errors.push('回收后重新 claim(' + wcAligned + ') -> ' + fmtErr(e3));
+            }
+          }
+        }
+        return out;
+      }
+      // 排空阶段超时留下的那个挂起读交给测量阶段收养（同一端点不允许有两个并发读，
+      // 否则它会偷走第一个块的回环数据）。它是唯一的"允许存在"的挂起传输。
+      if (dr.leftoverRead) {
+        out.leftoverRead = dr.leftoverRead;
+        pushLog('说明：设备看起来没有发心跳（首读超时且零积压）。排空阶段那个超时的读' +
+          '已转交给测量阶段收养，不额外 reset，也不会并发读同一端点。');
+      }
+      var expectedPending = out.leftoverRead ? 1 : 0;
+      if (APP.pending > expectedPending) {
+        out.aborted = '排空结束后仍有 ' + APP.pending + ' 个传输在飞行（期望 ≤' + expectedPending + '）';
+        pushLog('✘ ' + out.aborted);
+        return out;
+      }
+    } else {
+      out.drainSkipped = '用户关闭了「测量前排空」—— 这会让积压心跳排在 payload 之前，用于复现错位';
+      pushLog('⚠ ' + out.drainSkipped);
+    }
+    return out;
+  }
+
+  async function runLoopback() {
+    if (APP.loopRunning) { throw new Error('回环已在运行'); }
+    var d = needOpen();
+    needEp();
+    if (APP.claimedItf === null) {
+      logLine('warn', '尚未 claimInterface 就跑回环。多数平台需要在 claim 之后才能 bulk 传输；若失败请先 claim。');
+    }
+    var size = selectedSize();
+    var chunkSize = selectedChunk();
+    var perChunkTimeout = parseInt($('input-timeout').value, 10) || 3000;
+    var totalTimeout = parseInt($('input-total-timeout').value, 10) || autoTotalTimeout(size);
+    var excludeLF = !!(($('checkbox-exclude-lf') || {}).checked);
+    var autoReset = !!(($('checkbox-autoreset') || {}).checked);
+    var drainEnabled = !!(($('checkbox-drain') || {}).checked);
+
+    APP.loopRunning = true;
+    APP.stopRequested = false;
+    refreshUi();
+
+    // ① 彻底清零：全新过滤器 + 显式 reset，杜绝任何跨用例状态残留
+    var filter = createHbFilter();
+    filter.reset();
+    var ctx = {
+      filter: filter,
+      rawInBytes: 0,
+      surplus: new Uint8Array(0),   // surplus 结转余量，必须最终为 0
+      partsIn: 0,                   // 过滤器吐出的数据字节总数
+      delivered: 0,                 // 已交付给各块的字节总数
+      invariantChecked: 0,
+      invariantViolations: 0,
+      zeroLenReads: 0,              // 0 字节 transferIn（ZLP）次数 —— 设备在发 ZLP 的直接证据
+      maxZeroLenReads: 4096,        // 防自旋上限；用例总超时是最终兜底
+      deadline: null,               // 用例总超时的绝对时刻
+      deadlineMs: totalTimeout
+    };
+    var payload = makePayload(size, excludeLF, 0xC0FFEE);
+    var startAll = nowMs();
+    ctx.deadline = startAll + totalTimeout;
+    var rtts = [];
+    var mismatchCount = 0;
+    var firstMismatch = null;
+    var chunksDone = 0;
+    var totalChunks = Math.ceil(size / chunkSize);
+    var depBefore = APP.deprecated;
+    var logEl = $('loop-log');
+    var loopLog = [];
+    var drain = null;
+    var drainSkipped = null;
+    var pendingAtStart = APP.pending;
+
+    function pushLog(s) {
+      loopLog.push(s);
+      if (loopLog.length > 400) { loopLog.splice(0, 100); }
+      if (logEl) { logEl.textContent = loopLog.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+    }
+
+    pushLog('开始：目标 ' + fmtBytes(size) + '，分块 ' + chunkSize + ' B × ' + totalChunks +
+      '，单块超时 ' + perChunkTimeout + ' ms，用例总超时 ' + totalTimeout + ' ms，' +
+      '载荷' + (excludeLF ? '避开 0x0A（心跳过滤无歧义）' : '包含全部字节（raw 模式，心跳过滤可能误判）'));
+
+    var aborted = null;
+
+    // ② 跨用例泄漏防护（回收残留挂起传输） + ③ 测量前排空（对齐到心跳行边界）
+    var pre = await loopbackPreflight(pushLog, { drainEnabled: drainEnabled });
+    aborted = pre.aborted;
+    drain = pre.drain;
+    drainSkipped = pre.drainSkipped;
+    pendingAtStart = pre.pendingAtStart;
+    ctx.leftoverRead = pre.leftoverRead;   // 排空阶段留下的挂起读，由第一块收养
+
+    // ④ 排空用的是独立过滤器；这里再清一次，保证测量期计数严格从 0 开始
+    filter.reset();
+    APP.inStreamDirty = false;
+
+    try {
+      var off = 0, idx = 0;
+      while (!aborted && off < size) {
+        if (APP.stopRequested) { aborted = '用户点了「停止回环」'; break; }
+        if (nowMs() - startAll > totalTimeout) { aborted = '用例总超时 ' + totalTimeout + ' ms'; break; }
+        var len = Math.min(chunkSize, size - off);
+        var chunk = payload.subarray(off, off + len);
+        var t0 = nowMs();
+        var r;
+        try {
+          r = await echoChunkPipelined(chunk, ctx, perChunkTimeout);
+        } catch (e) {
+          var why = fmtErr(e);
+          pushLog('第 ' + idx + ' 块失败 @offset ' + off + ': ' + why);
+          R.errors.push('loopback chunk#' + idx + '@' + off + ' -> ' + why);
+          if ((e && e.isProbeTimeout) && autoReset) {
+            pushLog('超时且勾选了自动复位 → 调用 device.reset()。注意：没有 cancelTransfer，' +
+              '挂起的传输只能靠 reset() 让设备重新枚举来终结。已废弃挂起传输数 +' + (APP.deprecated - depBefore));
+            await forceReset('回环超时自动复位');
+          }
+          aborted = '第 ' + idx + ' 块失败: ' + why;
+          break;
+        }
+        var t1 = nowMs();
+        rtts.push(t1 - t0);
+        if (r.out && typeof r.out.bytesWritten === 'number' && r.out.bytesWritten !== len) {
+          pushLog('警告：第 ' + idx + ' 块 transferOut 只写了 ' + r.out.bytesWritten + '/' + len + ' 字节，status=' + r.out.status);
+        }
+        // 逐字节比对
+        var got = r.got;
+        var m;
+        for (m = 0; m < len; m++) {
+          if (got[m] !== chunk[m]) {
+            mismatchCount++;
+            if (firstMismatch === null) {
+              firstMismatch = {
+                chunk: idx, offset: off + m,
+                expected: chunk[m], actual: got[m]
+              };
+              pushLog('首处失配：全局偏移 ' + (off + m) + '（块 #' + idx + ' 内偏移 ' + m +
+                '）期望 ' + hex(chunk[m]) + ' 实际 ' + hex(got[m]));
+            }
+          }
+        }
+        off += len;
+        idx++;
+        chunksDone = idx;
+        if (idx % 16 === 0 || idx === totalChunks) {
+          var pct = (off / size * 100).toFixed(1);
+          setText('loop-progress', '进行中 ' + pct + '% · ' + fmtBytes(off) + ' / ' + fmtBytes(size) +
+            ' · 已过滤心跳 ' + filter.hbList.length + ' 行 · 失配 ' + mismatchCount + ' 字节');
+          await new Promise(function (r2) { setTimeout(r2, 0); });   // 让 UI 有机会刷新
+        }
+      }
+    } catch (e) {
+      aborted = '未预期异常: ' + fmtErr(e);
+      R.errors.push('runLoopback -> ' + fmtErr(e));
+      pushLog(aborted);
+    }
+
+    // 若用例在收养那个排空读之前就中止了，它仍挂在端点上 → 回收，绝不留悬空读
+    if (ctx.leftoverRead) {
+      pushLog('用例未进入读取阶段，收养的排空读尚未被消费 → device.reset() 回收，避免悬空读');
+      try { ctx.leftoverRead.then(function () {}, function () {}); } catch (eL) { /* ignore */ }
+      ctx.leftoverRead = null;
+      await forceReset('回收未被消费的排空读');
+    }
+
+    var elapsedMs = nowMs() - startAll;
+    // 一致字节数（= size − 失配）。旧版把它标成"实收"，被误读成"IN 总共只收到这么多字节"。
+    var matchedBytes = size - mismatchCount;
+    var throughput = (size / (elapsedMs / 1000));
+    var rttMin = rtts.length ? Math.min.apply(null, rtts) : null;
+    var rttMax = rtts.length ? Math.max.apply(null, rtts) : null;
+    var rttAvg = rtts.length ? (rtts.reduce(function (a, b) { return a + b; }, 0) / rtts.length) : null;
+
+    // ---- 字节对账（验收判据）----
+    // 恒等式：rawInBytes = hbBytes + partsIn + carryLeft
+    //          partsIn      = delivered + surplusLeft
+    //          delivered    = size（用例跑满时）
+    // ⇒ k = rawInBytes − size = hbBytes + surplusLeft + carryLeft
+    // ⇒ k − hbBytes = surplusLeft + carryLeft   ← 必须 0
+    // surplus 与 carry 是仅有的两个"合法"的差值来源；unaccounted 必须恒为 0，
+    // 否则说明有字节真的凭空消失（页面 bug），而不是排布问题。
+    var rawInBytes = ctx.rawInBytes;              // 测量期从 IN 读到的原始字节总数
+    var hbBytes = filter.hbBytes();               // 其中被完整剥离的心跳行字节数
+    var strayLFlines = filter.strayLF();          // 不构成心跳行、被当数据吐出的 0x0A 个数
+    var k = rawInBytes - size;                    // 位移量
+    var kMinusHb = k - hbBytes;                   // ★ 验收判据，必须为 0
+    var surplusLeft = ctx.surplus.length;
+    var carryLeftAtEnd = filter.carryLen();       // 用例结束时被扣在过滤器里的半行字节
+    var unaccounted = kMinusHb - surplusLeft - carryLeftAtEnd;
+    var invariantOk = (ctx.invariantViolations === 0);
+    // 用例是否**正常跑完**。中止时 k = rawInBytes − size 会是负数（根本没读完），
+    // 这些派生量在数学上无意义 → 一律显示 N/A，绝不报"页面 bug"（否则会把中止误报成丢字节）。
+    var completed = !aborted;
+    var comparedBytes = off;                      // 真正完成逐字节比对的字节数
+    var verdictOk = (mismatchCount === 0 && kMinusHb === 0 && unaccounted === 0 &&
+      invariantOk && completed);
+
+    // 一致字节数：跑完时 = size − 失配；中止时绝不能报"size − 失配"（会看起来像通过）
+    if (completed) {
+      setText('lb-bytes', fmtBytes(matchedBytes) + ' / ' + fmtBytes(size) +
+        '（= 目标 − 失配；不是 IN 总字节）');
+    } else {
+      setHtml('lb-bytes', '<span class="warn">已比对 ' + fmtBytes(comparedBytes) + ' / 期望 ' + fmtBytes(size) +
+        ' B</span>（其中一致 ' + fmtBytes(comparedBytes - mismatchCount) +
+        '）<br><span class="dim">用例中止，未跑完 —— 不要读成"通过"</span>');
+    }
+    setText('lb-chunks', chunksDone + ' / ' + totalChunks + ' 块（每块 ' + chunkSize + ' B）');
+    var mmHtml;
+    if (completed && mismatchCount === 0) { mmHtml = '<span class="ok">全部一致 ✔（0 字节失配）</span>'; }
+    else if (completed) { mmHtml = '<span class="err">失配 ' + mismatchCount + ' 字节 ✘</span>'; }
+    else {
+      mmHtml = '<span class="warn">未跑完（中止：' + esc(aborted) + '）</span>：已比对 ' +
+        fmtBytes(comparedBytes) + ' / ' + fmtBytes(size) + ' B，其中失配 ' + mismatchCount + ' 字节' +
+        '<br><span class="dim">中止的用例不做通过判定</span>';
+    }
+    setHtml('lb-mismatch', mmHtml);
+    setText('lb-first-mismatch', firstMismatch
+      ? ('全局偏移 ' + firstMismatch.offset + '（块 #' + firstMismatch.chunk + '）期望 ' + hex(firstMismatch.expected) + ' 实际 ' + hex(firstMismatch.actual))
+      : (mismatchCount === 0 ? (completed ? '无' : '无（已比对部分）') : '—'));
+
+    setText('lb-raw-in', fmtBytes(rawInBytes) + '（测量期，不含排空丢弃）');
+    setHtml('lb-hb-filtered', String(filter.hbList.length) + ' 行' +
+      (excludeLF ? '' : ' <span class="warn">[raw 模式：剥离结果可能误判]</span>'));
+    setHtml('lb-hb-bytes', String(hbBytes) + ' B（' + filter.hbList.length + ' 行）' +
+      (filter.hbList.length ? '<br><span class="dim">' + esc(filter.hbList.join(', ')) + ' ms</span>' : '') +
+      (excludeLF ? '' : ' <span class="warn">[raw 模式：剥离结果可能误判]</span>'));
+    setHtml('lb-stray-lf', String(strayLFlines) +
+      (strayLFlines > 0
+        ? ' <span class="err">✘（有非心跳的 0x0A 被当成数据 → 错位指纹）</span>'
+        : ' <span class="dim">✔</span>'));
+    setHtml('lb-zlp', String(ctx.zeroLenReads) + ' 次' +
+      (ctx.zeroLenReads > 0
+        ? ' <span class="dim">（0 字节 transferIn = 合法 ZLP，设备写满 max-packet 整数倍时的正常现象）</span>'
+        : ''));
+    if (completed) {
+      setText('lb-k', (k >= 0 ? '+' : '') + k + ' B   (k = rawInBytes − size)');
+      setHtml('lb-k-hb', '<span class="badge ' + (kMinusHb === 0 ? 'b-ok' : 'b-err') + '">' +
+        (kMinusHb === 0 ? 'PASS' : 'FAIL') + '</span> k − hbBytes = ' + kMinusHb + ' B' +
+        (kMinusHb === 0 ? '（字节账平，无凭空消失/位移）' : '（★ 验收不通过：有字节丢失或位移）'));
+      setHtml('lb-unaccounted', 'surplus=' + surplusLeft + ' B，carry=' + carryLeftAtEnd + ' B，' +
+        '<b>无法解释=' + unaccounted + ' B</b>' +
+        (unaccounted === 0
+          ? ' <span class="ok">✔（拆解干净）</span>'
+          : ' <span class="err">✘ 有字节凭空消失，页面 bug，请贴回报告</span>') +
+        (carryLeftAtEnd > 0
+          ? '<br><span class="dim">carry>0：用例结束时扣着一个半行心跳（尾部被截断），属排布现象</span>'
+          : ''));
+    } else {
+      // 中止：派生量无意义 → N/A，绝不标 ✘
+      setHtml('lb-k', '<span class="badge b-dim">N/A（用例中止）</span>');
+      setHtml('lb-k-hb', '<span class="badge b-dim">N/A（用例中止）</span>' +
+        ' <span class="dim">中止时 k = rawInBytes − size 会是负数，派生量在数学上无意义</span>');
+      setHtml('lb-unaccounted', '<span class="badge b-dim">N/A（用例中止）</span>' +
+        ' <span class="dim">不做字节对账判定；已比对部分失配 ' + mismatchCount + ' 字节</span>');
+    }
+    var drainTxt;
+    if (drain) {
+      drainTxt = (drain.aligned ? '✔ 已对齐到行边界' : '✘ 未对齐') +
+        '：读 ' + drain.reads + ' 次 / 丢弃 ' + drain.bytes + ' B（心跳 ' + drain.hbLines +
+        ' 行 = ' + drain.hbBytes + ' B，残留 LF ' + drain.strayLF + '），' + drain.reason +
+        '，耗时 ' + drain.elapsedMs + ' ms';
+    } else if (drainSkipped) {
+      drainTxt = '⚠ 已跳过（用户关闭「测量前排空」）';
+    } else {
+      drainTxt = '— 未执行（用例在排空前就中止）';
+    }
+    setText('lb-drain', drainTxt);
+    setText('lb-elapsed', elapsedMs.toFixed(1) + ' ms');
+    setText('lb-throughput', bytesPerSecStr(throughput));
+    setText('lb-mib', (throughput / 1048576).toFixed(3) + ' MiB/s');
+    setText('lb-rtt-min', ms(rttMin));
+    setText('lb-rtt-avg', ms(rttAvg));
+    setText('lb-rtt-max', ms(rttMax));
+
+    pushLog('结束：' + (aborted ? ('中止（' + aborted + '）') : '完成') +
+      (completed
+        ? '；一致 ' + matchedBytes + ' / ' + size + ' B'
+        : '；已比对 ' + comparedBytes + ' / 期望 ' + size + ' B') +
+      '；失配 ' + mismatchCount + ' B；' +
+      'rawInBytes=' + rawInBytes + '；hbBytes=' + hbBytes + '；strayLFlines=' + strayLFlines +
+      '；zeroLenReads(ZLP)=' + ctx.zeroLenReads + '；' +
+      (completed
+        ? ('k=' + k + '；k−hbBytes=' + kMinusHb + (kMinusHb === 0 ? ' ✔' : ' ✘') +
+           '（surplus=' + surplusLeft + ' + carry=' + carryLeftAtEnd + '，无法解释=' + unaccounted +
+           (unaccounted === 0 ? ' ✔' : ' ✘ 页面 bug') + '）')
+        : 'k / k−hbBytes / 无法解释 = N/A（用例中止，派生量无意义）'));
+    pushLog('字节对账不变量：partsIn=' + ctx.partsIn + ' delivered=' + ctx.delivered +
+      ' surplus=' + surplusLeft + ' 检查 ' + ctx.invariantChecked + ' 次，破坏 ' + ctx.invariantViolations + ' 次 → ' +
+      (invariantOk ? '✔ 总收到字节 == 各段之和' : '✘'));
+    pushLog('总耗时 ' + elapsedMs.toFixed(1) + ' ms；吞吐 ' + throughput.toFixed(0) + ' B/s；' +
+      'RTT min/avg/max = ' + ms(rttMin) + ' / ' + ms(rttAvg) + ' / ' + ms(rttMax));
+    setText('loop-progress', aborted
+      ? ('中止：' + aborted + '（已比对 ' + fmtBytes(comparedBytes) + ' / ' + fmtBytes(size) + '）')
+      : ('完成 100%：' + fmtBytes(size) + '，失配 ' + mismatchCount + ' B，k−hbBytes=' + kMinusHb));
+
+    R.loopback = {
+      requested: size,
+      chunkSize: chunkSize,
+      chunksTotal: totalChunks,
+      chunksDone: chunksDone,
+      expectedBytes: size,
+      completed: completed,
+      comparedBytes: comparedBytes,        // 真正完成比对的字节数（中止时 < size）
+      matchedBytes: matchedBytes,          // 一致字节数（仅 completed 时有意义）
+      mismatchBytes: mismatchCount,
+      firstMismatch: firstMismatch,
+      zeroLenReads: ctx.zeroLenReads,      // ZLP 次数：设备在发 ZLP 的直接证据
+      // ---- 字节对账 / 验收判据（仅 completed 时有意义）----
+      rawInBytes: rawInBytes,
+      hbBytes: hbBytes,
+      strayLFlines: strayLFlines,
+      k: k,
+      kMinusHb: kMinusHb,
+      surplusLeft: surplusLeft,
+      carryLeftAtEnd: carryLeftAtEnd,
+      unaccounted: unaccounted,
+      partsIn: ctx.partsIn,
+      deliveredBytes: ctx.delivered,
+      invariantChecked: ctx.invariantChecked,
+      invariantViolations: ctx.invariantViolations,
+      invariantOk: invariantOk,
+      // ---- 排空 / 跨用例防护 ----
+      drainEnabled: drainEnabled,
+      drain: drain,
+      drainSkipped: drainSkipped,
+      pendingAtStart: pendingAtStart,
+      pendingAtEnd: APP.pending,
+      deprecatedTransfers: APP.deprecated - depBefore,
+      // ---- 心跳明细 ----
+      hbFilteredLines: filter.hbList.length,
+      hbValues: filter.hbList.slice(0, 50),
+      // ---- 性能 ----
+      elapsedMs: Number(elapsedMs.toFixed(3)),
+      throughputBps: Number(throughput.toFixed(1)),
+      throughputMBs: Number((throughput / 1e6).toFixed(4)),
+      throughputMiBs: Number((throughput / 1048576).toFixed(4)),
+      rttMinMs: rttMin === null ? null : Number(rttMin.toFixed(3)),
+      rttAvgMs: rttAvg === null ? null : Number(rttAvg.toFixed(3)),
+      rttMaxMs: rttMax === null ? null : Number(rttMax.toFixed(3)),
+      payloadExcludesLF: excludeLF,
+      autoResetOnTimeout: autoReset,
+      aborted: aborted,
+      ok: verdictOk
+    };
+
+    APP.loopRunning = false;
+    refreshUi();
+  }
+
+  // ---------------------------------------------------------------- 心跳读取
+  async function readHeartbeat() {
+    if (APP.hbRunning) { throw new Error('心跳读取已在运行'); }
+    var d = needOpen();
+    needEp();
+    APP.hbRunning = true;
+    APP.hbStop = false;
+    refreshUi();
+    var timeoutMs = parseInt($('input-timeout').value, 10) || 3000;
+    var logEl = $('hb-log');
+    var lines = [];
+    var total = (R.heartbeat && R.heartbeat.lines) ? R.heartbeat.lines.slice() : [];
+    function push(s) {
+      lines.push(s);
+      if (lines.length > 300) { lines.splice(0, 60); }
+      if (logEl) { logEl.textContent = lines.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+    }
+    push('开始读心跳：EP ' + hex(APP.inEp) + '，单次超时 ' + timeoutMs + ' ms。设备空闲 ≥ 1 s 才发心跳，超时属正常。');
+    var tries = 0;
+    var uptimeLast = null;
+    while (!APP.hbStop && tries < 20) {
+      tries++;
+      try {
+        var res = await withTimeout(trackTransfer(d.transferIn(APP.inEp, HB_READ_LEN)), timeoutMs, 'transferIn(心跳)');
+        if (res.status !== 'ok') { push('#' + tries + ' status=' + res.status + '（非 ok）'); continue; }
+        var v = new Uint8Array(res.data.buffer, res.data.byteOffset, res.data.byteLength);
+        var hexs = [], ascii = '', i;
+        for (i = 0; i < v.length; i++) {
+          hexs.push(hex(v[i]).substr(2));
+          ascii += (v[i] === 0x0A) ? '\\n' : ((v[i] >= 32 && v[i] < 127) ? String.fromCharCode(v[i]) : '.');
+        }
+        setText('hb-raw', hexs.join(' ') + '   |   ' + ascii);
+        var text = '';
+        for (i = 0; i < v.length; i++) { text += String.fromCharCode(v[i]); }
+        var re = /\nHB\s+(\d+)\n/g;
+        var m, found = 0;
+        while ((m = re.exec(text)) !== null) {
+          found++;
+          uptimeLast = parseInt(m[1], 10);
+          total.push(uptimeLast);
+          push('#' + tries + ' 心跳: HB ' + uptimeLast + ' ms  (= ' + (uptimeLast / 1000).toFixed(2) + ' s)');
+        }
+        if (!found) { push('#' + tries + ' 收到 ' + v.length + ' 字节但无完整 HB 行（可能是片段）: ' + ascii); }
+      } catch (e) {
+        if (e && e.isProbeTimeout) {
+          push('#' + tries + ' 超时：' + timeoutMs + ' ms 内没等到心跳（设备可能非空闲或未实现心跳）');
+          break;
+        }
+        push('#' + tries + ' 异常: ' + fmtErr(e));
+        R.errors.push('readHeartbeat -> ' + fmtErr(e));
+        break;
+      }
+    }
+    setText('hb-count', String(total.length));
+    if (uptimeLast !== null) { setText('hb-uptime', uptimeLast + ' ms  (' + (uptimeLast / 1000).toFixed(2) + ' s)'); }
+    R.heartbeat = {
+      reads: tries,
+      lines: total,
+      count: total.length,
+      lastUptimeMs: uptimeLast,
+      lastUptimeHuman: uptimeLast === null ? null : (uptimeLast / 1000).toFixed(2) + ' s'
+    };
+    APP.hbRunning = false;
+    // 读心跳可能在"一行中间"停下，IN 流从此不再是行边界 → 标记脏，下一次回环用例的排空会处理它
+    APP.inStreamDirty = true;
+    refreshUi();
+  }
+
+  // ---------------------------------------------------------------- 报告
+  function pad(k, v) { return '  ' + k + ': ' + (v === undefined || v === null || v === '' ? '(空)' : v); }
+  function buildReport() {
+    var L = [];
+    L.push('===== MeidaP4 WebUSB 探测报告 (probe v0) =====');
+    L.push('生成时间: ' + new Date().toISOString());
+    L.push('页面: ' + location.href);
+    L.push('');
+    L.push('--- 1. 环境 (契约 §6.1) ---');
+    if (R.env) {
+      L.push(pad('isSecureContext', R.env.isSecureContext));
+      L.push(pad('location.protocol', R.env.protocol));
+      L.push(pad('navigator.usb 存在', R.env.hasUsb));
+      L.push(pad('userAgent', R.env.userAgent));
+      L.push(pad('判定', R.env.verdict));
+      if (R.env.note) { L.push(pad('说明', R.env.note)); }
+    } else { L.push('  (未采集)'); }
+    L.push('');
+    L.push('--- 2. 设备标识 (契约 §2) ---');
+    if (R.device) {
+      L.push(pad('vendorId', R.device.vendorId));
+      L.push(pad('productId', R.device.productId));
+      L.push(pad('productName', R.device.productName));
+      L.push(pad('manufacturerName', R.device.manufacturerName));
+      L.push(pad('serialNumber', R.device.serialNumber));
+      L.push(pad('bcdUSB', R.device.bcdUSB));
+      L.push(pad('bcdDevice', R.device.bcdDevice));
+      L.push(pad('class/sub/proto', R.device.classTriple));
+      L.push(pad('opened', R.device.opened));
+      L.push(pad('configuration', R.device.configuration));
+      L.push(pad('模式推断', R.device.modeGuess));
+      L.push(pad('接口分类', R.device.interfaceKinds));
+    } else { L.push('  (未获取设备)'); }
+    L.push('');
+    L.push('--- 3. 描述符全清单 ---');
+    L.push(R.descDump ? R.descDump : '  (未获取设备)');
+    L.push('');
+    L.push('--- 4. claimInterface (冒烟A关键证据, 契约 §6.3) ---');
+    if (R.claim) {
+      L.push(pad('结果', R.claim.ok ? 'SUCCESS' : 'FAILED'));
+      L.push(pad('接口号 IF', R.claim.itf));
+      L.push(pad('alternate', R.claim.alt));
+      L.push(pad('err.name (原文)', R.claim.errName));
+      L.push(pad('err.message (原文)', R.claim.errMessage));
+    } else { L.push('  (未执行)'); }
+    L.push('');
+    L.push('--- 5. 回环 (契约 §4 / §6.4) ---');
+    if (R.loopback) {
+      var b = R.loopback;
+      L.push(pad('目标字节 size', b.requested));
+      L.push(pad('分块', b.chunkSize + ' B × ' + b.chunksTotal + '（完成 ' + b.chunksDone + '）'));
+      L.push(pad('用例状态', b.completed ? '正常跑完 ✔' : ('中止 —— ' + b.aborted)));
+      L.push(pad('★ 已比对字节', b.comparedBytes + ' / ' + b.requested + ' B' +
+        (b.completed ? '' : '   [没跑完，不要读成"通过"]')));
+      if (b.completed) {
+        L.push(pad('★ 一致字节数 (= size − mismatchCount)', b.matchedBytes +
+          '   [注意：这不是 IN 总字节，别误读成"只收到这么多"]'));
+      } else {
+        L.push('    一致字节数: N/A（用例中止，这个数在没读完时无意义且会误导）');
+      }
+      L.push(pad('★ mismatchCount', b.mismatchBytes));
+      L.push(pad('首处失配（全局偏移 + 期望/实际）', b.firstMismatch
+        ? ('全局偏移 ' + b.firstMismatch.offset + '（块 #' + b.firstMismatch.chunk + '）期望 ' + hex(b.firstMismatch.expected) + ' 实际 ' + hex(b.firstMismatch.actual))
+        : (b.completed ? '无' : '无（已比对部分）')));
+      L.push(pad('★ rawInBytes (IN 原始总字节, 测量期)', b.rawInBytes));
+      L.push(pad('★ hbBytes (被剥离心跳字节)', b.hbBytes));
+      L.push(pad('★ strayLFlines (疑似残留 LF 行)', b.strayLFlines));
+      L.push(pad('ZLP 次数 zeroLenReads', b.zeroLenReads +
+        '   [0 字节 transferIn = 合法 ZLP；设备写满 max-packet 整数倍时的正常现象]'));
+      if (b.completed) {
+        L.push(pad('★ k = rawInBytes − size', (b.k >= 0 ? '+' : '') + b.k));
+        L.push(pad('★ k − hbBytes  【验收判据，必须 0】', b.kMinusHb + (b.kMinusHb === 0 ? '  PASS ✔' : '  FAIL ✘')));
+        L.push(pad('账目分解', 'k − hbBytes = surplus(' + b.surplusLeft + ') + carry(' + b.carryLeftAtEnd +
+          ')，因此 k − hbBytes − surplus − carry = ' + b.unaccounted +
+          (b.unaccounted === 0 ? '  ✔ 拆解干净（无字节凭空消失）' : '  ✘ 页面 bug：有字节凭空消失')));
+        L.push(pad('surplus 结转残留', b.surplusLeft + ' B'));
+        L.push(pad('carry 残留（尾部半行心跳）', b.carryLeftAtEnd + ' B'));
+      } else {
+        L.push('    k / k − hbBytes / 无法解释: N/A（用例中止）');
+        L.push('      中止时 k = rawInBytes − size 会是负数（根本没读完），派生量在数学上无意义；');
+        L.push('      旧版把它标成 "✘ 页面 bug" 会把"中止"误报成"字节消失"。');
+      }
+      L.push(pad('字节对账不变量', 'partsIn=' + b.partsIn + ' delivered=' + b.deliveredBytes +
+        ' surplus=' + b.surplusLeft + ' 检查' + b.invariantChecked + '次/破坏' + b.invariantViolations + '次 → ' +
+        (b.invariantOk ? '✔ 总收到字节 == 各段之和' : '✘ 有字节丢失')));
+      L.push(pad('过滤掉心跳行', b.hbFilteredLines + (b.hbValues && b.hbValues.length ? (' 值(前50): ' + b.hbValues.join(',')) : '')));
+      L.push(pad('测量前排空 drain', b.drainEnabled ? '已启用' : '已禁用（可复现错位）'));
+      if (b.drain) {
+        L.push('    排空读数: ' + b.drain.reads + ' 次，丢弃 ' + b.drain.bytes + ' B' +
+          '（完整心跳 ' + b.drain.hbLines + ' 行 = ' + b.drain.hbBytes + ' B，残留 LF ' + b.drain.strayLF +
+          '，carry 残留 ' + b.drain.carryLeft + ' B）');
+        L.push('    对齐=' + (b.drain.aligned ? '是 ✔（行边界，已消费完整心跳行）' : '否 ✘') +
+          '，停止原因=' + b.drain.reason + '，耗时 ' + b.drain.elapsedMs + ' ms');
+      } else if (b.drainSkipped) {
+        L.push('    ' + b.drainSkipped);
+      }
+      L.push(pad('用例开始时在飞行的传输数', b.pendingAtStart + '（>0 会先 reset 回收）'));
+      L.push(pad('用例结束时在飞行的传输数', b.pendingAtEnd));
+      L.push(pad('总耗时', b.elapsedMs + ' ms'));
+      L.push(pad('吞吐量', b.throughputMBs + ' MB/s (10^6) = ' + b.throughputMiBs + ' MiB/s'));
+      L.push(pad('RTT min/avg/max', b.rttMinMs + ' / ' + b.rttAvgMs + ' / ' + b.rttMaxMs + ' ms'));
+      L.push(pad('载荷避开 0x0A', b.payloadExcludesLF));
+      L.push(pad('超时自动复位', b.autoResetOnTimeout));
+      L.push(pad('中止原因', b.aborted));
+      L.push(pad('因超时废弃的挂起传输数', b.deprecatedTransfers));
+      L.push(pad('结论', b.ok
+        ? 'PASS（正常跑完 且 mismatchCount==0 且 k−hbBytes==0 且 无法解释==0 且不变量成立）'
+        : (b.completed
+          ? 'FAIL（跑完但对账/比对不通过）'
+          : '中止（未完成，不做通过判定）—— 原因：' + b.aborted)));
+    } else { L.push('  (未执行)'); }
+    L.push('');
+    L.push('--- 6. 心跳 (契约 §4 / §6.5) ---');
+    if (R.heartbeat) {
+      L.push(pad('读次数', R.heartbeat.reads));
+      L.push(pad('收到心跳行数', R.heartbeat.count));
+      L.push(pad('最后 uptime', R.heartbeat.lastUptimeMs));
+      L.push(pad('uptime(可读)', R.heartbeat.lastUptimeHuman));
+    } else { L.push('  (未读取)'); }
+    L.push('');
+    L.push('--- 7. 模式 B 提示 (契约 §6.6) ---');
+    L.push('  资源管理器应同时出现名为 "MeidaP4 Storage" 的便携设备（MTP，IF0，由 wpdmtp.sys 占用）。');
+    L.push('  本页不应 claim MTP 接口（模式 B 的 IF0），只能用 Vendor 接口（模式 B = IF1, EP 0x03/0x83）。');
+    if (R.mtpHint) { L.push('  ' + R.mtpHint.replace(/\n/g, '\n  ')); }
+    L.push('');
+    L.push('--- 8. 可选 GET_URL 探测 ---');
+    L.push(R.geturl ? ('  ' + R.geturl.replace(/\n/g, '\n  ')) : '  (未执行)');
+    L.push('');
+    L.push('--- 9. 异常汇总 (' + R.errors.length + ') ---');
+    if (R.errors.length) {
+      var i;
+      for (i = 0; i < R.errors.length; i++) { L.push('  [' + i + '] ' + R.errors[i]); }
+    } else { L.push('  (无)'); }
+    L.push('');
+    L.push('--- 10. 未实测/不可验证项 ---');
+    L.push('  - 未实测声明: ' + R.note);
+    L.push('  - BOS / WebUSB 平台能力原文无法从 JS 读取（WebUSB 不暴露 BOS）。');
+    L.push('    「设备出现在 requestDevice 列表」只是间接证据；BOS 原文需 chrome://usb-internals 或 USB 抓包。');
+    L.push('  - WebUSB 没有 cancelTransfer（WICG/webusb#25 未关闭）：');
+    L.push('    IN 侧"取消"实现为 Promise.race 超时 + device.reset() 强制复位；超时的挂起 promise 只能标记废弃。');
+    L.push('    本次因超时废弃的挂起传输数见第 5 节。');
+    L.push('  - 本页只用了标准 WebUSB API（navigator.usb），无任何外部依赖/CDN/构建步骤。');
+    L.push('');
+    L.push('===== 报告结束 =====');
+    return L.join('\n');
+  }
+
+  function exportReport() {
+    var txt = buildReport();
+    var ta = $('report-output');
+    if (ta) {
+      ta.value = txt;
+      try { ta.focus(); ta.select(); } catch (e) { /* ignore */ }
+    }
+    logLine('ok', '已生成报告（' + txt.length + ' 字符）');
+    return txt;
+  }
+  async function copyReport() {
+    var ta = $('report-output');
+    if (!ta || !ta.value) { exportReport(); }
+    ta = $('report-output');
+    var txt = ta ? ta.value : '';
+    if (!txt) { throw new Error('报告为空'); }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(txt);
+        logLine('ok', '报告已复制到剪贴板');
+        return;
+      }
+    } catch (e) {
+      logLine('warn', 'clipboard API 失败，请手工 Ctrl+C 复制: ' + fmtErr(e));
+    }
+    try { ta.focus(); ta.select(); document.execCommand('copy'); logLine('ok', '已用 execCommand 复制'); }
+    catch (e2) { logLine('warn', '自动复制失败，请手工在文本框里 Ctrl+A / Ctrl+C'); }
+  }
+  async function copyLog() {
+    var txt = LOG.join('\n');
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(txt); logLine('ok', '日志已复制'); return; }
+    } catch (e) { /* fallthrough */ }
+    var el = $('log-output');
+    if (el) { try { var r = document.createRange(); r.selectNodeContents(el); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy'); logLine('ok', '日志已复制(选区)'); } catch (e2) { logLine('warn', '复制日志失败'); } }
+  }
+
+  // ---------------------------------------------------------------- UI 刷新
+  function refreshUi() {
+    try {
+      var hasUsb = !!(navigator && navigator.usb);
+      var hasDev = !!APP.device;
+      var isOpen = hasDev && APP.device.opened;
+      var running = APP.loopRunning || APP.hbRunning;
+      function dis(id, v) { var e = $(id); if (e) { e.disabled = !!v; } }
+      dis('btn-request-device', !hasUsb || running);
+      dis('btn-list-authorized', !hasUsb || running);
+      dis('btn-forget', !hasDev || running);
+      dis('btn-reset', !hasDev || running);
+      dis('btn-open', !hasDev || isOpen || running);
+      dis('btn-close', !isOpen || running);
+      dis('btn-select-config', !isOpen || running);
+      dis('select-config', !isOpen || running);
+      dis('btn-claim', !isOpen || running);
+      dis('btn-release', !isOpen || APP.claimedItf === null || running);
+      dis('btn-dump-desc', !hasDev || running);
+      dis('btn-run-loopback', !isOpen || running);
+      dis('btn-stop-loopback', !APP.loopRunning);
+      dis('btn-read-heartbeat', !isOpen || running);
+      dis('btn-stop-heartbeat', !APP.hbRunning);
+      dis('btn-get-url', !isOpen || running);
+      dis('select-size', running);
+      dis('select-chunk', running);
+      var sizeSelNow = $('select-size');
+      dis('input-custom-size', running || !(sizeSelNow && sizeSelNow.value === 'custom'));
+      dis('input-timeout', running);
+      dis('input-total-timeout', running);
+      dis('select-interface', running);
+      dis('select-alternate', running);
+      dis('checkbox-exclude-lf', running);
+      dis('checkbox-drain', running);
+      dis('checkbox-autoreset', running);
+      dis('btn-export-report', false);
+      dis('btn-copy-report', false);
+      dis('btn-clear-log', false);
+      dis('btn-copy-log', false);
+      if (hasDev) {
+        setText('dv-opened', String(APP.device.opened));
+      }
+      // 当前 claim 状态单独放一个元素，避免每次 refreshUi 往 claim-hint 里重复追加
+      if (APP.claimedItf !== null) {
+        setText('claim-state', '当前已 claim：IF' + APP.claimedItf +
+          (APP.claimedAlt !== null ? (' alt ' + APP.claimedAlt) : '') +
+          '，IN EP ' + hex(APP.inEp) + ' / OUT EP ' + hex(APP.outEp) +
+          '（回环就用这对端点）');
+      } else if (hasDev) {
+        setText('claim-state', '当前未 claim 任何接口。模式 A 选 IF0；模式 B 选 IF1（IF0 是 MTP，不要 claim）。');
+      } else {
+        setText('claim-state', '');
+      }
+    } catch (e) {
+      logLine('warn', 'refreshUi 异常: ' + fmtErr(e));
+    }
+  }
+
+  // ---------------------------------------------------------------- 接线
+  function wire() {
+    on('btn-request-device', requestDevice);
+    on('btn-list-authorized', listAuthorized);
+    on('btn-forget', async function () {
+      var d = needDevice();
+      if (APP.claimedItf !== null) { try { await d.releaseInterface(APP.claimedItf); } catch (e) { /* ignore */ } }
+      await d.forget();
+      APP.device = null; APP.claimedItf = null; APP.inEp = null; APP.outEp = null;
+      hide('device-summary'); show('device-none');
+      setText('desc-tree', '已 forget()，需要重新请求设备。');
+      logLine('ok', 'forget() 成功：授权已撤销');
+      refreshUi();
+    });
+    on('btn-reset', async function () { await forceReset('用户点击「强制复位设备」'); });
+    on('btn-open', openDevice);
+    on('btn-close', closeDevice);
+    on('btn-select-config', selectConfig);
+    on('btn-dump-desc', async function () {
+      var d = needDevice();
+      setText('desc-tree', dumpDescriptors(d));
+      R.descDump = dumpDescriptors(d);
+      logLine('ok', '已重新输出描述符清单');
+    });
+    on('btn-claim', doClaim);
+    on('btn-release', doRelease);
+    on('btn-run-loopback', runLoopback);
+    on('btn-stop-loopback', async function () {
+      APP.stopRequested = true;
+      logLine('warn', '已请求停止回环；若有挂起的 transferIn，本页会按需 device.reset() 让它以 rejected 结束（无 cancelTransfer 可用）。');
+      var d = APP.device;
+      if (d && d.opened) {
+        try { await d.reset(); logLine('ok', '停止时 reset() 已执行，挂起传输应已 rejected'); }
+        catch (e) { logLine('warn', '停止时 reset() 失败: ' + fmtErr(e)); }
+      }
+    });
+    on('btn-read-heartbeat', readHeartbeat);
+    on('btn-stop-heartbeat', function () { APP.hbStop = true; logLine('info', '已请求停止读心跳'); });
+    on('btn-get-url', doGetUrl);
+    on('btn-export-report', function () { exportReport(); });
+    on('btn-copy-report', copyReport);
+    on('btn-clear-log', function () { LOG.length = 0; var el = $('log-output'); if (el) { el.textContent = '（日志已清空）'; } });
+    on('btn-copy-log', copyLog);
+
+    var itfSel = $('select-interface');
+    if (itfSel) { itfSel.addEventListener('change', function () { try { syncAltSelect(); refreshUi(); } catch (e) { logLine('warn', '切换接口失败: ' + fmtErr(e)); } }); }
+    var altSel = $('select-alternate');
+    if (altSel) { altSel.addEventListener('change', function () { try { syncEpSelect(); refreshUi(); } catch (e) { logLine('warn', '切换 alternate 失败: ' + fmtErr(e)); } }); }
+    var sizeSel = $('select-size');
+    if (sizeSel) {
+      sizeSel.addEventListener('change', function () {
+        try {
+          var custom = sizeSel.value === 'custom';
+          var el = $('input-custom-size');
+          if (el) { el.disabled = !custom; }
+          var tt = $('input-total-timeout');
+          if (tt) { tt.value = String(autoTotalTimeout(selectedSize())); }
+          logLine('info', '已选择数据量 ' + fmtBytes(selectedSize()) + '，建议总超时 ' + autoTotalTimeout(selectedSize()) + ' ms');
+        } catch (e) { logLine('warn', '数据量切换失败: ' + fmtErr(e)); }
+      });
+    }
+    // 拔出/断开事件
+    if (navigator.usb) {
+      try {
+        navigator.usb.addEventListener('disconnect', function (ev) {
+          try {
+            var d = ev.device;
+            if (APP.device && d && d.vendorId === APP.device.vendorId && d.productId === APP.device.productId) {
+              APP.claimedItf = null;
+              logLine('warn', '设备已断开 (disconnect 事件)。请重新 requestDevice。');
+              R.errors.push('设备断开: VID=' + hex(d.vendorId) + ' PID=' + hex(d.productId));
+              refreshUi();
+            }
+          } catch (x) { /* ignore */ }
+        });
+        navigator.usb.addEventListener('connect', function (ev) {
+          try { logLine('info', '设备已连接 (connect 事件): VID=' + hex(ev.device.vendorId) + ' PID=' + hex(ev.device.productId)); }
+          catch (x) { /* ignore */ }
+        });
+      } catch (e) { logLine('warn', '注册 usb connect/disconnect 监听失败: ' + fmtErr(e)); }
+    }
+  }
+
+  // ---------------------------------------------------------------- 启动
+  function boot() {
+    try {
+      var el = $('input-custom-size');
+      if (el) { el.disabled = true; }
+      renderEnv();
+      wire();
+      var tt = $('input-total-timeout');
+      if (tt) { tt.value = String(autoTotalTimeout(selectedSize())); }
+      refreshUi();
+      logLine('info', 'probe v0 已启动。navigator.usb=' + (!!navigator.usb) +
+        '，isSecureContext=' + window.isSecureContext + '，protocol=' + location.protocol);
+      exportReport();   // 先给一份空报告，方便无设备时也能导出环境信息
+      if (!navigator.usb) {
+        fatal('<b>这个浏览器没有 WebUSB（navigator.usb 不存在）</b>。请用 Windows 上的 Chrome 或 Edge 重新打开本文件。', false);
+      }
+      setText('loop-progress', '就绪。步骤：请求设备 → 打开 → claim 接口 → 开始回环。');
+    } catch (e) {
+      try {
+        fatal('<b>页面初始化失败</b>：' + esc(fmtErr(e)) + '（页面未白屏，其余功能可能不可用）', false);
+        logLine('err', 'boot() 失败: ' + fmtErr(e));
+      } catch (x) { /* 最后的兜底 */ }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>

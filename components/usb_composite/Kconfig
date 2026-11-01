@@ -1,0 +1,44 @@
+menu "USB composite (I1)"
+
+    config USB_COMPOSITE_MSOS_FUNCTION_SUBSET
+        bool "Emit a Function Subset Header (0x0002) for each WCID function"
+        default y
+        help
+            MS OS 2.0 规范形态。probe-report §5（U8）与 §2.5 互相矛盾：
+            §2.5 说模式 B（带 Function Subset Header + 单数 REG_SZ）真机 Chrome claim 成功，
+            §5 却把该组合列为未验证。本阶段设备不可用，两开关都默认 y。
+            上电后第一优先复测 —— 见 docs/contracts/frozen-allocation.md §5.1 与
+            docs/device-test-requests.md。
+
+    config USB_COMPOSITE_MSOS_CONFIG_SUBSET
+        bool "Emit a Configuration Subset Header (0x0001) before the function subsets"
+        default n
+        help
+            默认**关**：探测期真机验证过的形态（模式 B，166 B）**没有**这一节，
+            见 docs/contracts/frozen-allocation.md §5.2。
+            打开它 = 做一次 A/B 实验（多一个功能时是否该补 Configuration Subset，没有任何真机证据）。
+            保持关闭时，MS OS 2.0 描述符集与已验证形态逐字节一致。
+
+    config USB_COMPOSITE_SELFCHECK_ON_BOOT
+        bool "Run the offline descriptor/budget self-check during usb_composite_start()"
+        default y
+        help
+            逐字节解析自己组装出来的描述符，与 docs/contracts/frozen-allocation.md 冻结节逐项比对，
+            并复算 DWC2 FIFO 预算。这是**离线自检**，不替代真机枚举。
+
+    config USB_COMPOSITE_VBUS_MONITOR_IO
+        int "VBUS monitor GPIO (-1 = disabled)"
+        default -1
+        help
+            自供电时用于监测 VBUS。板子由总线供电时保持 -1。
+
+    config USB_COMPOSITE_SELF_POWERED
+        bool "Declare the device as self-powered"
+        default n
+
+    config USB_COMPOSITE_MAX_POWER_MA
+        int "bMaxPower declaration in mA"
+        default 500
+        range 100 500
+
+endmenu

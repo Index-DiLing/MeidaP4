@@ -1,0 +1,16 @@
+# **诊断用** defaults —— 打开 TinyUSB 自身日志（CFG_TUSB_DEBUG），
+# 用来定位"复合设备枚举失败"到底卡在哪一步。
+#
+# 用法（**不是验收构建**）：
+#   $env:MEIDAP4_MODE='prod'
+#   pwsh -File tools/build.ps1 -Mode prod -Slot usbdbg -ExtraDefaults sdkconfig.diag-usbdbg.defaults -Clean
+#
+# 为什么需要它：`netd_open:905 ASSERT FAILED` 说明 NCM 控制接口被**第二次**打开
+# （断言内容是 ep_notif == 0），也就是"第一次 SET_CONFIGURATION 里某个驱动 open 失败 →
+# Windows 重试 → 第二次被拒 → 永久失败"。串口只能看到最终症状，
+# 看不到第一次是哪一步返回 0。TinyUSB 的 TU_LOG 会把每次 open/assert 打出来
+# （TG_LOG 会打印 file:line，正好指到失败点）。
+#
+# ⚠️ 打开后会明显变慢、日志变多，只用于诊断。
+
+CONFIG_TINYUSB_DEBUG_LEVEL=2

@@ -1,0 +1,7 @@
+# ESP32-P4 · 32 MB Flash · 探测阶段分区表
+# Name,     Type, SubType, Offset,   Size,  Flags
+# 说明：app 给 4M（plan §4.5 要求 ≥4MB）；storage 是 MTP 探测卷（片内，非 SD 卡）。
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  4M,
+storage,    data, fat,     ,         4M,

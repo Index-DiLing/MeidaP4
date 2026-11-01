@@ -1,0 +1,23 @@
+# =============================================================================
+# **诊断用** defaults —— 只为拿到"链接成功"的证据，**不是验收构建**
+#
+# 用法：
+#   pwsh -File tools/build.ps1 -Mode prod -Slot <slot> -ExtraDefaults sdkconfig.diag-noncm.defaults
+#
+# 为什么需要它（WS-storage 2026-10 发现）：
+#   `esp_tinyusb 2.3.0` 的第二处**打包缺陷**（与 MTP 那处同构，见 probe-report §3.2）：
+#     - `tud_network_recv_cb` 的强定义在 `esp_tinyusb/tinyusb_net.c`（与 `tinyusb_net_init` 同一编译单元）；
+#     - 上游 `tinyusb/src/class/net/ncm_device.c:694` **无条件引用**它；
+#     - 但工程里没有任何目标文件引用 `tinyusb_net_init`（`components/usb_net/` 还没有源码）
+#       → 静态库成员不被提取 → `undefined reference to 'tud_network_recv_cb'` → 链接失败。
+#   正式修法是 `components/usb_net/CMakeLists.txt` 里加 `-Wl,--undefined=tinyusb_net_init`
+#   （把该归档成员变成 --gc-sections 的根），**WS-net 负责**。
+#
+# 在 WS-net 落地之前，本文件把 NCM 关掉，让**其余功能**能链接出 ELF，
+# 以便写入者拿到自己的 `nm` / 链接证据。**它证明的东西比正式构建少**：
+#   ❌ 不能用来声称"完整版构建通过"  ❌ 不覆盖 NCM
+#   ✅ 可以用来核对 MTP 强符号（`nm` 里 `mtp_dispatch` 应为 `T`）与 SD/视频/协议侧的链接
+# =============================================================================
+
+CONFIG_TINYUSB_NET_MODE_NCM=n
+CONFIG_TINYUSB_NET_MODE_NONE=y

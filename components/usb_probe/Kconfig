@@ -1,0 +1,33 @@
+menu "USB probe (components/usb_probe)"
+
+    config USB_PROBE_MTP_ITF_ENABLE
+        bool "Include the MTP interface in the probe configuration descriptors (mode B)"
+        default y if TINYUSB_MTP_ENABLED
+        default n
+        help
+            usb_probe 的 FS/HS 配置描述符里是否包含 MTP 接口（IF0，EP1 事件 + EP2 数据），
+            Vendor 回环接口随之从 IF0/EP1（模式 A）变为 IF1/EP3（模式 B）。
+
+            这个开关必须与 CONFIG_TINYUSB_MTP_ENABLED 保持一致，否则描述符表会和
+            TinyUSB 里实际启用/未启用的类驱动脱钩（usb_probe.c 用 #error 强制检查）。
+            端点分配见 docs/probe-contract.md §1，不要在探测期单方面改动。
+
+    config USB_PROBE_DEVICE_CLASS_IAD
+        bool "Declare the device as composite: bDeviceClass=0xEF/0x02/0x01 (Misc/IAD)"
+        default y if TINYUSB_MTP_ENABLED
+        default n
+        help
+            控制 **device 描述符** 的 bDeviceClass/SubClass/Protocol：
+
+              y = 0xEF / 0x02 / 0x01（Misc / Common / IAD）→ Windows 挂 usbccgp，
+                  再按接口把 MTP 交给 wpdmtp.sys、把 vendor 接口交给 winusb.sys。
+                  模式 B（MTP + Vendor 复合）**必须**用这个值。
+              n = 0xFF / 0x00 / 0x00（Vendor Specific，非复合）→ 父节点自己就是功能设备，
+                  是"WebUSB on Windows"的经典形态。模式 A（单 Vendor）默认用这个值：
+                  真机实测复合形态下 vendor 子接口拿不到 GUID_DEVINTERFACE_USB_DEVICE
+                  ({A5DCBF10-…})，Chrome 因此看不到设备。
+
+            这个开关只影响 device 描述符的类字段；接口/端点分配（契约 §1）不随它变化。
+            usb_probe.c 里有编译期检查：模式 B 若被置成 n 会直接 #error。
+
+endmenu

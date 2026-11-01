@@ -1,0 +1,76 @@
+menu "MeidaP4 · WS-net — USB 网卡（NCM / NAPT 网关）"
+
+    choice APP_USBNET_MODE
+        prompt "USB 网卡工作模式（编译期二选一）"
+        default APP_USBNET_MODE_NAPT
+        help
+            plan §0.1 定案：**NAPT 路由**。三条决定性理由：
+              ① 上游 AP 只看到 1 个客户端（只有 P4）→ 酒店/企业/访客 Wi-Fi 也能用；
+              ② 避免 PC 出现"同网段双路由"这类极难排查的间歇故障；
+              ③ Espressif 在同一套栈（hosted + NAPT）里已跑通（examples/wifi/softap_sta）。
+            L2 桥接只作降级备选保留。
+
+        config APP_USBNET_MODE_NAPT
+            bool "NAPT 路由（P4 做网关 + DHCP server + NAT）"
+            select LWIP_IP_FORWARD
+            select LWIP_IPV4_NAPT
+            help
+                选中即**自动**打开 lwIP 的 IP 转发与 NAPT。
+                这里用 select 而不是 depends on：若用 depends on，用户没先打开
+                `CONFIG_LWIP_IPV4_NAPT` 时本选项会直接消失、choice 里只剩 BRIDGE，
+                而"想要 NAPT 却发现选项没了"是很容易误判的体验。
+                ⚠️ `select` 会绕过被选符号自身的 depends on，所以 LWIP_IP_FORWARD 必须一起选
+                （LWIP_IPV4_NAPT 依赖它）。
+
+        config APP_USBNET_MODE_BRIDGE
+            bool "L2 桥接（降级备选，未真机验证）"
+            help
+                P4 当透明二层桥，PC 直接从上游 AP 取 IP。代码保留在 usb_net_bridge.c。
+                ⚠️ 已知问题（写死在代码里的警告）：
+                  * IDF 官方 bridge 示例 README 明确说 **Wi-Fi STA 在 3 地址模式下不能被
+                    透明二层桥接**（examples/network/bridge/README.md:164）；
+                  * 上游 AP 会看到 2 个客户端，酒店/门户认证 Wi-Fi 下 PC 上不了网。
+                真机切换前请先读 usb_net.c 里 usb_net_start() 的桥接分支日志。
+    endchoice
+
+    # ⚠️ 这两项**刻意不加** `depends on APP_USBNET_MODE_NAPT`：
+    #    Kconfig 的 depends 不成立时符号**根本不存在**，sdkconfig.h 里就没有
+    #    CONFIG_APP_USBNET_DHCP_POOL_SIZE → C 里 `(uint32_t)CONFIG_...` 直接编译失败。
+    #    实测：桥接模式编译过一次就炸（bridge build, usb_net.c:529）。
+    #    它们只在 NAPT 路径被使用，桥接模式下配了也不生效（help 里已写明）。
+    config APP_USBNET_DHCP_POOL_SIZE
+        int "DHCP 地址池大小（个，仅 NAPT 模式生效）"
+        range 1 100
+        default 64
+        help
+            lwIP 的 DHCP server 硬上限是 DHCPS_MAX_LEASE = 100
+            （dhcpserver.h:75；esp_netif_lwip.c:2699 会校验 end-start+1 <= 100）。
+            池从 usb_net_config_t.dhcp_start（默认 192.168.77.2）起算。
+            桥接模式（CONFIG_APP_USBNET_MODE_BRIDGE=y）下本项不生效。
+
+    config APP_USBNET_DHCP_LEASE_S
+        int "DHCP 租约时间（秒，仅 NAPT 模式生效）"
+        range 60 86400
+        default 3600
+        help
+            桥接模式（CONFIG_APP_USBNET_MODE_BRIDGE=y）下本项不生效。
+
+    config APP_USBNET_TX_TIMEOUT_MS
+        int "lwIP → USB 同步发送超时（ms）"
+        range 1 5000
+        default 100
+        help
+            `tinyusb_net_send_sync()` 的超时。它在 TinyUSB 任务里用 `usbd_defer_func` 把数据
+            memcpy 进 NCM 的 NTB；USB 侧没有空闲 NTB 时 `do_send_sync()` 会**立刻**返回 ESP_FAIL
+            而不是等满超时，所以这个值只在 TinyUSB 任务卡住时才有意义。
+
+    config APP_USBNET_TX_LOCK_MS
+        int "拿发送锁的超时（ms）"
+        range 1 5000
+        default 50
+        help
+            esp_tinyusb 2.3.0 的 net 发送是**不可重入**的单例
+            （tinyusb_net.c:105 的 `s_net_obj.packet_to_send` 是一个全局），
+            usb_net 用一把互斥锁把所有 lwIP 发送串行化。
+
+endmenu

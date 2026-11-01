@@ -1,0 +1,6 @@
+# =============================================================================
+# 探测模式 A · 单 Vendor 接口 + WebUSB/WCID（不含 MTP）
+# 用法：-D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.a.defaults"
+# =============================================================================
+CONFIG_TINYUSB_MTP_ENABLED=n
+CONFIG_PROBE_ENABLE_MTP=n

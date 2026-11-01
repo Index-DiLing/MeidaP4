@@ -1,0 +1,51 @@
+menu "MeidaP4 · WS-net — 上游 Wi-Fi STA（esp_hosted / C6 射频）"
+
+    config NET_HOSTED_WIFI_SSID
+        string "Wi-Fi SSID（留空 = 只扫描不连接）"
+        default ""
+        help
+            P4 自己没有射频：上游经 C6（esp_hosted 3.0.7 + esp_wifi_remote）出去。
+
+            留空时组件仍然会正常启动并把 STA netif 建好，只做一次扫描打印 AP 列表
+            （便于没有凭据/没有 AP 时也能把整机跑起来）。填了 SSID 才会连接。
+
+    config NET_HOSTED_WIFI_PASSWORD
+        string "Wi-Fi 密码（open 网络留空）"
+        default ""
+
+    config NET_HOSTED_WPA3_SAE
+        bool "按 WPA3-SAE 协商（否则 WPA2-PSK 及以上）"
+        default n
+        help
+            默认 WPA2-PSK 阈值（= hello_p4 真机可用配置）。
+            目标 AP 只允许 WPA3 时打开本项。
+
+    config NET_HOSTED_LOG_CP_VERSION
+        bool "开机打印一次 C6 固件握手版本（留档用）"
+        default y
+        help
+            走 esp_hosted 的 RPC（get_coprocessor_fw_version / get_cp_info）取回 CP 的
+            固件版本、chip id、idf_target 并打一条 INFO。C6 不在/没握手时只打 WARN，不 abort。
+            失败不影响启动 —— 无凭据/无 C6 也要能开机。
+
+    config NET_HOSTED_CONNECT_RETRY_MAX
+        int "连续重连次数上限（0 = 无限重连）"
+        range 0 1000
+        default 0
+        help
+            0 = 一直重连（酒店/会议室漫游场景推荐）。非 0 时用尽即进入 FAILED 状态。
+
+    config NET_HOSTED_RECONNECT_MS
+        int "断开后重连延迟 (ms)"
+        range 200 60000
+        default 2000
+        help
+            用一次性 esp_timer 排重连，**不**在事件回调里 vTaskDelay
+            （那会阻塞默认事件循环，见 hello_p4 的写法与 net_hosted.c 注释）。
+
+    config NET_HOSTED_SCAN_LOG_MAX
+        int "SSID 留空时打印前几个 AP"
+        range 0 32
+        default 8
+
+endmenu

@@ -1,0 +1,596 @@
+[
+ {
+  "name": "frame/ctrl/ping",
+  "kind": "frame",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "notes": "CTRL 通道最小帧（PING，payload 4 B）"
+ },
+ {
+  "name": "frame/ctrl/hello",
+  "kind": "frame",
+  "channel": 0,
+  "flags": 2,
+  "seq": 1,
+  "length": 8,
+  "payload_hex": "010001007f000000",
+  "frame_hex": "4d5001000200080001002b97010001007f000000",
+  "crc16": 38699,
+  "notes": "CTRL HELLO，含 u32 caps 体"
+ },
+ {
+  "name": "frame/video/chunk0",
+  "kind": "frame",
+  "channel": 1,
+  "flags": 1,
+  "seq": 258,
+  "length": 24,
+  "payload_hex": "00010005d0021e000100050000000000ffd8ffe000104a46",
+  "frame_hex": "4d5001010100180002011e6200010005d0021e000100050000000000ffd8ffe000104a46",
+  "crc16": 25118,
+  "notes": "VIDEO 通道，固定 16 B 子头 + MORE 置位"
+ },
+ {
+  "name": "frame/file/read_req",
+  "kind": "frame",
+  "channel": 2,
+  "flags": 6,
+  "seq": 65535,
+  "length": 13,
+  "payload_hex": "040034120000010068656c6c6f",
+  "frame_hex": "4d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "crc16": 52276,
+  "notes": "FILE 通道，seq 回绕上界 0xFFFF + ACK|RETX"
+ },
+ {
+  "name": "frame/log/line",
+  "kind": "frame",
+  "channel": 3,
+  "flags": 0,
+  "seq": 42,
+  "length": 13,
+  "payload_hex": "6c6f673a20626f6f74206f6b0a",
+  "frame_hex": "4d50010300000d002a007e7d6c6f673a20626f6f74206f6b0a",
+  "crc16": 32126,
+  "notes": "LOG 通道，无 flag"
+ },
+ {
+  "name": "frame/telem/36b",
+  "kind": "frame",
+  "channel": 4,
+  "flags": 0,
+  "seq": 300,
+  "length": 36,
+  "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "frame_hex": "4d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "crc16": 57608,
+  "notes": "TELEM 通道，定长 36 B payload"
+ },
+ {
+  "name": "frame/ctrl/length0",
+  "kind": "frame",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 0,
+  "payload_hex": "",
+  "frame_hex": "4d500100020000000000acdb",
+  "crc16": 56236,
+  "notes": "边界：length=0（合法，payload_hex 为空串）"
+ },
+ {
+  "name": "frame/video/length1024_pattern",
+  "kind": "frame",
+  "channel": 1,
+  "flags": 0,
+  "seq": 43690,
+  "length": 1024,
+  "payload_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+  "frame_hex": "4d50010100000004aaaac920000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+  "crc16": 8393,
+  "notes": "边界：length=1024（上限），payload = 0..255 循环"
+ },
+ {
+  "name": "frame/log/length1024_ones",
+  "kind": "frame",
+  "channel": 3,
+  "flags": 0,
+  "seq": 1,
+  "length": 1024,
+  "payload_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "frame_hex": "4d5001030000000401009df9ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "crc16": 63901,
+  "notes": "边界：length=1024，全 0xFF（CRC 边界）"
+ },
+ {
+  "name": "frame/file/all_flags",
+  "kind": "frame",
+  "channel": 2,
+  "flags": 15,
+  "seq": 255,
+  "length": 14,
+  "payload_hex": "616c6c20666f757220666c616773",
+  "frame_hex": "4d5001020f000e00ff00eebe616c6c20666f757220666c616773",
+  "crc16": 48878,
+  "notes": "四个 flag 位同时置位，验证 flags 字段无损"
+ },
+ {
+  "name": "crc/check_123456789",
+  "kind": "crc",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 9,
+  "payload_hex": "313233343536373839",
+  "frame_hex": "",
+  "crc16": 10673,
+  "notes": "CRC catalogue check 值（第三方常量）"
+ },
+ {
+  "name": "crc/empty",
+  "kind": "crc",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 0,
+  "payload_hex": "",
+  "frame_hex": "",
+  "crc16": 65535,
+  "notes": "空输入 = init"
+ },
+ {
+  "name": "crc/single_zero",
+  "kind": "crc",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 1,
+  "payload_hex": "00",
+  "frame_hex": "",
+  "crc16": 57840,
+  "notes": "单字节 0x00"
+ },
+ {
+  "name": "crc/mp_magic",
+  "kind": "crc",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 2,
+  "payload_hex": "4d50",
+  "frame_hex": "",
+  "crc16": 15466,
+  "notes": "magic 字面量"
+ },
+ {
+  "name": "crc/00_ff_256",
+  "kind": "crc",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 256,
+  "payload_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+  "frame_hex": "",
+  "crc16": 16317,
+  "notes": "0x00..0xFF 全字节序列"
+ },
+ {
+  "name": "stream/two_frames_one_push",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010002000400000050ea030000004d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   },
+   {
+    "channel": 4,
+    "flags": 0,
+    "seq": 300,
+    "length": 36,
+    "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "两帧首尾相连，一次喂入应解出两帧（协议 §6.4）",
+  "invariant_group": "two_frames"
+ },
+ {
+  "name": "stream/two_frames_bytewise",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010002000400000050ea030000004d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "chunk_size": 1,
+  "zero_push_every": 4,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   },
+   {
+    "channel": 4,
+    "flags": 0,
+    "seq": 300,
+    "length": 36,
+    "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "同上，但每 1 字节喂一次 + 每 4 次插一个 0 字节空 push（ZLP 语义 §4.1）",
+  "invariant_group": "two_frames"
+ },
+ {
+  "name": "stream/three_frames_chunk7",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010002000400000050ea030000004d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d80700004d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "chunk_size": 7,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   },
+   {
+    "channel": 4,
+    "flags": 0,
+    "seq": 300,
+    "length": 36,
+    "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000"
+   },
+   {
+    "channel": 2,
+    "flags": 6,
+    "seq": 65535,
+    "length": 13,
+    "payload_hex": "040034120000010068656c6c6f"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "7 字节分片（跨帧边界、非 2 的幂），应解出全部三帧"
+ },
+ {
+  "name": "stream/resync_garbage",
+  "kind": "stream",
+  "channel": 2,
+  "flags": 6,
+  "seq": 65535,
+  "length": 13,
+  "payload_hex": "040034120000010068656c6c6f",
+  "frame_hex": "4d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "crc16": 52276,
+  "stream_hex": "0011224d33507f4d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 2,
+    "flags": 6,
+    "seq": 65535,
+    "length": 13,
+    "payload_hex": "040034120000010068656c6c6f"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 7,
+  "notes": "7 字节垃圾（含孤立的 0x4D / 0x50 陷阱）后重新同步，后续帧不得丢",
+  "invariant_group": "garbage_resync"
+ },
+ {
+  "name": "stream/resync_garbage_bytewise",
+  "kind": "stream",
+  "channel": 2,
+  "flags": 6,
+  "seq": 65535,
+  "length": 13,
+  "payload_hex": "040034120000010068656c6c6f",
+  "frame_hex": "4d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "crc16": 52276,
+  "stream_hex": "0011224d33507f4d50010206000d00ffff34cc040034120000010068656c6c6f",
+  "chunk_size": 1,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 2,
+    "flags": 6,
+    "seq": 65535,
+    "length": 13,
+    "payload_hex": "040034120000010068656c6c6f"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 7,
+  "notes": "同上，1 字节喂入",
+  "invariant_group": "garbage_resync"
+ },
+ {
+  "name": "stream/crc_field_bad",
+  "kind": "stream",
+  "channel": 4,
+  "flags": 0,
+  "seq": 300,
+  "length": 36,
+  "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "frame_hex": "4d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "crc16": 57608,
+  "stream_hex": "4d50010300000d002a007f7d6c6f673a20626f6f74206f6b0a4d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 4,
+    "flags": 0,
+    "seq": 300,
+    "length": 36,
+    "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000"
+   }
+  ],
+  "expect_crc_errors": 1,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "CRC 字段被改坏 -> 丢该帧且不影响后续帧（crc_errors=1，bad_header=0）"
+ },
+ {
+  "name": "stream/crc_payload_bad",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010206000d00ffff34cc5e0034120000010068656c6c6f4d50010002000400000050ea03000000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 1,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "payload 被改坏 -> 同一帧 CRC 失败丢弃，后续帧照解"
+ },
+ {
+  "name": "stream/junk3000_then_frame",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "6162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465666162636465664d50010002000400000050ea03000000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 3000,
+  "notes": "3000 字节无 magic 垃圾（超解码器 1036 B 缓冲）后仍能解出后续帧"
+ },
+ {
+  "name": "stream/length1025_illegal",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d5001000000010401001c8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4d50010002000400000050ea03000000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 1,
+  "expect_resync_bytes": 32,
+  "notes": "非法 length=1025 -> 丢弃候选帧并 resync（bad_header=1），后续帧照解。resync_bytes=32 = 候选头之后被跳过的 32 B 垃圾；候选头自身 12 B 归 bad_header（事件），不重复计入（冻结头 wu_codec.h:148-164 的 2026-10 裁决）",
+  "invariant_group": "length1025"
+ },
+ {
+  "name": "stream/length1025_bytewise",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d5001000000010401001c8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4d50010002000400000050ea03000000",
+  "chunk_size": 1,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 1,
+  "expect_resync_bytes": 32,
+  "notes": "同上，1 字节喂入（与 length1025_illegal 属同一不变量组：喂入粒度不得改变诊断计数）",
+  "invariant_group": "length1025"
+ },
+ {
+  "name": "stream/nested_magic_crc_bad",
+  "kind": "stream",
+  "channel": 4,
+  "flags": 0,
+  "seq": 300,
+  "length": 36,
+  "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "frame_hex": "4d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "crc16": 57608,
+  "stream_hex": "4d5001020200120003006d344d500100020006000900430c6e65737465644d500104000024002c0108e140e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 4,
+    "flags": 0,
+    "seq": 300,
+    "length": 36,
+    "payload_hex": "40e20100400d0300c0c62d000010000000200000dc05000003000000b80b0000d8070000"
+   }
+  ],
+  "expect_crc_errors": 1,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "坏 CRC 帧的 payload 里含一个完整合法帧：必须整帧跳过、不得从帧内重扫出伪帧"
+ },
+ {
+  "name": "stream/zlp_interleaved",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010002000400000050ea03000000",
+  "chunk_size": -1,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "3/0/5/0/4/0 分片喂入：0 字节 push 是合法 no-op，不推进状态（协议 §4.1）",
+  "chunk_plan": [
+   0,
+   3,
+   0,
+   5,
+   0,
+   4,
+   0,
+   4
+  ]
+ },
+ {
+  "name": "stream/partial_header_only",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 0,
+  "seq": 0,
+  "length": 0,
+  "payload_hex": "",
+  "frame_hex": "",
+  "crc16": 0,
+  "stream_hex": "4d50",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "只有 2 字节候选头：不得产出帧、不得计入 bad_header、不得崩"
+ },
+ {
+  "name": "stream/frame_then_partial",
+  "kind": "stream",
+  "channel": 0,
+  "flags": 2,
+  "seq": 0,
+  "length": 4,
+  "payload_hex": "03000000",
+  "frame_hex": "4d50010002000400000050ea03000000",
+  "crc16": 59984,
+  "stream_hex": "4d50010002000400000050ea030000004d500100",
+  "chunk_size": 0,
+  "zero_push_every": 0,
+  "expect_frames": [
+   {
+    "channel": 0,
+    "flags": 2,
+    "seq": 0,
+    "length": 4,
+    "payload_hex": "03000000"
+   }
+  ],
+  "expect_crc_errors": 0,
+  "expect_bad_header": 0,
+  "expect_resync_bytes": 0,
+  "notes": "完整帧 + 半截候选头：只解出前帧"
+ }
+]

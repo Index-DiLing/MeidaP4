@@ -1,0 +1,15 @@
+# MeidaP4 · WS-net · **只用于编译验证** CONFIG_APP_USBNET_MODE_BRIDGE 这条降级分支
+#
+# 为什么需要一个单独的 defaults 文件 + 单独槽位：
+#   * usb_net_bridge.c **只在** CONFIG_APP_USBNET_MODE_BRIDGE=y 时进 SRCS；
+#     不验它 = 给自己留一个"真出问题想一键降级时才发现编不过"的坑。
+#   * `sdkconfig.<slot>-prod` 会被脚本持久化并**覆盖** defaults，所以绝不能拿 -Slot net 跑这个
+#     （会把全队的验收 sdkconfig 落在桥接模式）。
+#
+# 用法（单独槽位，与 -Slot net 互不干扰）：
+#   pwsh -File tools/build.ps1 -Mode prod -Slot netbr `
+#        -ExtraDefaults components/usb_net/test/sdkconfig.bridge.defaults
+#
+# ⚠️ 桥接模式**未在真机验证过**，见 usb_net_bridge.c 文件头的三条已知问题（其中第一条是
+#    IDF 官方 bridge 示例 README 明确写的"Wi-Fi STA 在 3 地址模式下无法被透明二层桥接"）。
+CONFIG_APP_USBNET_MODE_BRIDGE=y

@@ -1,0 +1,47 @@
+## IDF Component Manager Manifest File
+##
+## ⚠️ 本文件是**共享且互斥**的：只有 Lead 改它（见 docs/contracts/frozen-allocation.md §7）。
+##    其他写入者构建时必须设 `$env:IDF_COMPONENT_MANAGER='0'`（tools/build.ps1 -NoComponentManager），
+##    否则并发 idf.py 会争抢组件管理器锁与 dependencies.lock。
+##
+## 版本决策（全部可在本地组件缓存 C:\Espressif\tools\components 离线解析）：
+##   esp_tinyusb  **2.3.0 锁死**
+##       - 首个带 MTP 支持的版本；批 0 真机验证过的唯一版本
+##       - 已知缺陷：MTP 强符号未被链接（需 -Wl,--undefined=mtp_dispatch，见 probe-report §3.2）
+##       - 2.4.0 只修了"默认 NCM/ECM 描述符缺 IAD"，而**我们自带描述符**，不受影响 → 不升级
+##   esp_wifi_remote >=1.6.4  → 传递引入 esp_hosted 3.0.7（hello_p4 已验证可用的组合）
+##   esp_h264 ^1.4.1          → targets 含 esp32p4；阶段二硬件 H.264
+##   lvgl ==9.2.0             → 锁死，避免 9.3/9.5 的 API 漂移
+##
+## ⚠️ 刻意**不引入**：
+##   espressif/esp_jpeg  —— 那是 TJpgDec **解码器**。我们要的硬件 **JPEG 编码器**在 ESP-IDF 自带的
+##                          `components/esp_driver_jpeg`（`driver/jpeg_encode.h`），无需外部组件。
+##   espressif/esp_codec_dev —— 板载 MIC/喇叭，本方案用不到（plan §4.3）。
+dependencies:
+  idf:
+    version: '>=6.0'
+  espressif/esp_tinyusb:
+    version: '==2.3.0'
+    public: true
+  # ⚠️ 本地 vendor + 打补丁（2026-10-21 真机实测后新增）
+  #
+  # 上游 TinyUSB 0.21.0~2 的 `netd_open()`（src/class/net/ncm_device.c:904）**缺接口类守卫**，
+  # 而 usbd.c 内建驱动表里 netd(usbd.c:333) 排在 mtpd(:361) **之前** ⇒ netd 会抢走配置的第一个接口
+  # （我们的 IF0 = MTP）⇒ 到真正的 NCM 接口时 `netd_open:905` 断言失败 ⇒ `process_set_config` 失败
+  # ⇒ Stall EP0 ⇒ Windows `CM_PROB_FAILED_START`(problem=10)。
+  # 完整证据链见 docs/findings-t1-2026-10-21.md §3。
+  #
+  # 修法：项目内本地副本 + 在 netd_open 首部补
+  #   TU_VERIFY(TUSB_CLASS_CDC == bInterfaceClass, 0);
+  #   TU_VERIFY(TUSB_CDC_SUBCLASS_NCM == bInterfaceSubClass, 0);
+  # 这样**冻结的接口/端点分配表完全不用改**（否则只能把 NCM 挪到 IF0，推翻整套契约与 389 条断言）。
+  # ⚠️ 不要删 components/tinyusb/ 里那段补丁；升级 TinyUSB 前先确认上游是否已修。
+  espressif/tinyusb:
+    version: '0.21.0~2'
+    override_path: '../components/tinyusb'
+  espressif/esp_wifi_remote:
+    version: '>=1.6.4'
+  espressif/esp_h264:
+    version: '^1.4.1'
+  lvgl/lvgl:
+    version: '==9.2.0'

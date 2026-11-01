@@ -1,0 +1,41 @@
+menu "Probe configuration"
+
+    config PROBE_ENABLE_USB
+        bool "Enable USB probe core (components/usb_probe)"
+        default y
+        help
+            Installs the TinyUSB device stack on the ESP32-P4 high-speed port with the
+            probe descriptors: WebUSB BOS capability, MS OS 2.0 (WCID) descriptors and a
+            bulk loopback endpoint pair.
+
+    config PROBE_ENABLE_MTP
+        bool "Enable MTP probe backend (components/mtp_probe)"
+        default y if TINYUSB_MTP_ENABLED
+        default n
+        help
+            Mounts the internal FATFS 'storage' partition and registers it as an MTP
+            storage through esp_tinyusb. Requires CONFIG_TINYUSB_MTP_ENABLED.
+
+    config PROBE_MTP_MOUNT_POINT
+        string "MTP probe mount point"
+        default "/mtp"
+
+    config PROBE_MTP_FORMAT_IF_NEEDED
+        bool "Format the storage partition when no FAT filesystem is found"
+        default y
+
+    config PROBE_MODE_NAME
+        string
+        default "B (MTP + vendor)" if TINYUSB_MTP_ENABLED
+        default "A (vendor only)"
+
+    # ⚠️ 这里**刻意没有** "PROD_APP_ENABLE" 之类的入口开关（Lead 2026-10-21 移除）。
+    #    入口选择由 `tools/build.ps1 -Mode prod` 传给 CMake 的 `-DMEIDAP4_MODE=prod` 决定。
+    #    为什么不用 Kconfig：IDF 的 component manager 会因"缺 Kconfig 值"重跑一次 configure，
+    #    而首次那一遍 sdkconfig 尚未生成 ⇒ 所有 CONFIG_* 在 CMake 里都是空的 ⇒
+    #    结构判断走错分支且**第一遍已经生效**。实测症状：日志出现两条入口 STATUS，
+    #    ninja 给 main_prod.cpp 的编译行却带着 usb_probe/mtp_probe 的 include
+    #    → `fatal error: mtp_backend.h: No such file or directory`。
+    #    ⇒ 构建结构只能依赖"第一遍就可见"的输入（-D 传入的 CMake 变量）。
+
+endmenu

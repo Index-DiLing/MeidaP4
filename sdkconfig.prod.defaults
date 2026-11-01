@@ -1,0 +1,189 @@
+# =============================================================================
+# 完整版（prod）· 四功能复合固件
+#
+# 用法：
+#   pwsh -File tools/build.ps1 -Mode prod -Slot <你的slot> -NoComponentManager
+#   等价于 idf.py -B build-<slot>-prod -D SDKCONFIG=sdkconfig.<slot>-prod \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod.defaults" build
+#
+# 本文件**只有 Lead 能改**。要加配置项 → 在完成报告里给 Lead 确切的行。
+# 分配表见 docs/contracts/frozen-allocation.md。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 分区表：完整版用独立文件（探测期的 partitions.csv 保持冻结不动）
+# -----------------------------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.prod.csv"
+
+# -----------------------------------------------------------------------------
+# 芯片 / 时钟（板子实测 revision v3.2，见 docs/probe-report.md §1）
+# -----------------------------------------------------------------------------
+CONFIG_ESP32P4_REV_MIN_301=y
+
+# -----------------------------------------------------------------------------
+# 入口选择
+#
+# ⚠️ 入口**不在这里**（也不该在任何 Kconfig 里）：
+#   由 `tools/build.ps1 -Mode prod` → CMake `-DMEIDAP4_MODE=prod` 决定，
+#   见 main/CMakeLists.txt 顶部说明（Kconfig 值在首次 configure 时不可见，会导致
+#   入口与 REQUIRES 跨分支错配 —— 已实测踩过）。
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# USB 设备栈：MTP + 2×Vendor + NCM（**不加 CDC/MSC/HID**，plan §0 已砍）
+# -----------------------------------------------------------------------------
+CONFIG_TINYUSB_MSC_ENABLED=n
+CONFIG_TINYUSB_CDC_ENABLED=n
+CONFIG_TINYUSB_HID_COUNT=0
+CONFIG_TINYUSB_BTH_ENABLED=n
+
+# MTP：SD 卡唯一卷（frozen-allocation §1 IF0 / EP1+EP2）
+CONFIG_TINYUSB_MTP_ENABLED=y
+CONFIG_TINYUSB_MTP_EP_BUFSIZE=4096
+CONFIG_TINYUSB_MTP_MAX_STORAGES=1
+
+# Vendor：**必须恰好 2** —— IF1(视频，只有 IN) + IF2(控制，IN+OUT)
+#   Kconfig 上限恰为 2；upstream vendor 驱动每个接口只认 1 IN + 1 OUT，
+#   所以"视频独占 IN"只能靠两个接口实现（frozen-allocation §1）
+CONFIG_TINYUSB_VENDOR_COUNT=2
+CONFIG_TINYUSB_VENDOR_EPSIZE=512
+CONFIG_TINYUSB_VENDOR_RX_BUFSIZE=4096
+CONFIG_TINYUSB_VENDOR_TX_BUFSIZE=8192
+
+# NCM：IF3+IF4 带 IAD（frozen-allocation §6）
+#   ⚠️ esp_tinyusb 2.3.0 的**默认** NCM 描述符缺 IAD（2.4.0 才修）——我们自带描述符，不受影响
+CONFIG_TINYUSB_NET_MODE_NCM=y
+CONFIG_TINYUSB_NET_MODE_ECM_RNDIS=n
+CONFIG_TINYUSB_NET_MODE_NONE=n
+CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=3
+CONFIG_TINYUSB_NCM_OUT_NTB_BUFFS_COUNT=3
+
+# DCD：Buffer DMA（P4 默认）。注意 dcd_dwc2.c 会因此扣掉 2*ep_count = 32 word 的 EPInfo，
+# FIFO 预算见 docs/contracts/frozen-allocation.md §2.2
+CONFIG_TINYUSB_MODE_DMA=y
+
+# 默认描述符兜底值。**实际全部由 components/usb_composite 自带**（device/qualifier/strings/FS+HS cfg），
+# 这里只是为了让 esp_tinyusb 的默认数组也编译得过、日志好看。
+CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID=y
+CONFIG_TINYUSB_DESC_USE_DEFAULT_PID=n
+CONFIG_TINYUSB_DESC_CUSTOM_PID=0x4103
+# bcdDevice 必须与 components/usb_composite 的默认身份（0x0110）一致。
+# 2026-10-22 T2：加了 IF1(WinUSB) 的 MS OS Function Subset，递增 REV 以让 Windows 重新取 MSOS 描述符。
+CONFIG_TINYUSB_DESC_BCD_DEVICE=0x0110
+CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="MeidaP4"
+CONFIG_TINYUSB_DESC_PRODUCT_STRING="MeidaP4 Composite"
+CONFIG_TINYUSB_DESC_SERIAL_STRING="COMPOSITE-0001"
+CONFIG_TINYUSB_DESC_MTP_STRING="MeidaP4 SD Card"
+
+# -----------------------------------------------------------------------------
+# 复合层（components/usb_composite）
+# -----------------------------------------------------------------------------
+# MS OS 2.0 描述符形状：**照抄 probe 阶段真机验证过的模式 B 形态**（166 B），
+# 见 docs/contracts/frozen-allocation.md §5.1/§5.2（probe-report §5 的 U8 说法已被源码复核推翻）。
+# Configuration Subset Header 默认**关**（从未验证过，留作上电 A/B 实验项）。
+CONFIG_USB_COMPOSITE_MSOS_FUNCTION_SUBSET=y
+CONFIG_USB_COMPOSITE_MSOS_CONFIG_SUBSET=n
+CONFIG_USB_COMPOSITE_SELFCHECK_ON_BOOT=y
+
+# -----------------------------------------------------------------------------
+# NAPT 路由（plan §0.1）—— ⚠️ hello_p4 里这两项是**关**的，属本方案新增
+# -----------------------------------------------------------------------------
+CONFIG_LWIP_IP_FORWARD=y
+CONFIG_LWIP_IPV4_NAPT=y
+# lwIP 统计：只有开了它，`usb_net_get_stats().nat_entries` 才是**真实** NAPT 会话数
+# （`ip_napt_get_stats` 被 `#if LWIP_STATS` 包着）。不开时代码诚实返回 0。
+CONFIG_LWIP_STATS=y
+# 注意：**不要**全局关 IPv6。plan §0.1 要求的是"USB netif 上关掉 RA/DHCPv6"，
+# 这件事由 components/usb_net 在 esp_netif 层做，不影响 esp_hosted 的上游 IPv6。
+CONFIG_LWIP_IPV6=y
+
+# -----------------------------------------------------------------------------
+# esp_hosted / esp_wifi_remote（C6 射频）—— 逐项取自 E:\ESP_PROJECT\hello_p4\sdkconfig（已真机可用）
+# -----------------------------------------------------------------------------
+CONFIG_ESP_WIFI_REMOTE_IN_IDF=y
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+
+CONFIG_ESP_HOSTED=y
+CONFIG_ESP_HOSTED_HOST=y
+CONFIG_ESP_HOSTED_HOST_TYPE_MCU=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_CP_TARGET_FROM_WIFI_REMOTE=y
+CONFIG_ESP_HOSTED_IDF_SLAVE_TARGET="esp32c6"
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_NONE=y
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=y
+CONFIG_ESP_HOSTED_HOST_AUTO_FEAT_INIT=y
+CONFIG_ESP_HOSTED_HOST_CORE=y
+# ⚠️ 少了 FEAT_WIFI，esp_wifi_init() 会静默退回 weak 桩并返回 ESP_ERR_NOT_SUPPORTED
+CONFIG_ESP_HOSTED_HOST_FEAT_RPC=y
+CONFIG_ESP_HOSTED_HOST_FEAT_RPC_EXT_V2=y
+CONFIG_ESP_HOSTED_HOST_FEAT_SYSTEM=y
+CONFIG_ESP_HOSTED_HOST_FEAT_WIFI=y
+CONFIG_ESP_HOSTED_HOST_CP_RESET_STRATEGY_ALWAYS=y
+CONFIG_ESP_HOSTED_HOST_CP_RESET_SETTLE_MS=1500
+CONFIG_ESP_HOSTED_HOST_CP_BRINGUP_TIMEOUT_MS=5000
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=y
+CONFIG_ESP_HOSTED_HOST_LOG_LEVEL_INFO=y
+CONFIG_ESP_HOSTED_HOST_RPC_TIMEOUT_MS=5000
+CONFIG_ESP_HOSTED_HOST_DEFLT_TASK_STACK_BYTES=4096
+CONFIG_ESP_HOSTED_HOST_TO_ESP_WIFI_DATA_THROTTLE=y
+CONFIG_ESP_HOSTED_TO_WIFI_DATA_THROTTLE_HIGH_THRESHOLD=80
+CONFIG_ESP_HOSTED_TO_WIFI_DATA_THROTTLE_LOW_THRESHOLD=60
+
+# 传输：SDIO。⚠️ hosted 用 **Slot 1**（CMD19/CLK18/D0~D3 14/15/16/17，复位 GPIO54）
+#     → **Slot 0 空出来给 SD 卡**，这是两个功能能共存的前提（feasibility §5.1）
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_HOST_RESET_GPIO=54
+CONFIG_ESP_HOSTED_HOST_RESET_ACTIVE_LOW=y
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CMD=19
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK=18
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D0=14
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D1=15
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D2=16
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D3=17
+CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4=y
+CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ=40000
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
+
+# -----------------------------------------------------------------------------
+# 存储
+# -----------------------------------------------------------------------------
+# SD 卡走 SDMMC **Slot 0**（GPIO39~44 专用 IOMUX）+ 4-bit + 40 MHz + 片内 LDO4 供电
+# （GPIO 与 LDO 通道号由 components/sd_storage 的 Kconfig 提供，见该组件）
+# FATFS：中文文件名（plan §4.2）—— 注意 hello_p4 用的是 CP437/ANSI，我们按 plan 用 UTF-8+CP936
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+CONFIG_FATFS_CODEPAGE_936=y
+CONFIG_FATFS_VOLUME_COUNT=2
+CONFIG_FATFS_SECTOR_4096=y
+CONFIG_FATFS_PER_FILE_CACHE=y
+
+# -----------------------------------------------------------------------------
+# LVGL 9.2（批 3 画面显示）—— 离屏渲染 RGB565，再交给硬件 JPEG
+# -----------------------------------------------------------------------------
+# 色深必须是 16 位（RGB565）：既匹配 LVGL 默认，也直接是 JPEG 编码器的输入格式。
+CONFIG_LV_COLOR_DEPTH_16=y
+# 单任务模型：只有视频管线的渲染任务调用 lv_timer_handler()，不需要 OS 封装。
+CONFIG_LV_USE_OS_NONE=y
+# LVGL 自己的小对象堆（不是帧缓冲；帧缓冲在 PSRAM 里由 video_pipe 分配）。
+CONFIG_LV_MEM_SIZE_KILOBYTES=128
+# 720p 仪表盘要用的字号（默认只开 14；ui 组件按 LV_FONT_MONTSERRAT_48→14 逐级降级，
+# 所以这四行是"观感"而不是"能否编译"的必要条件）。
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# -----------------------------------------------------------------------------
+# PSRAM 给 LVGL 帧缓冲用（32 MB @ 250 MHz，已在 sdkconfig.defaults 里）
+# -----------------------------------------------------------------------------
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+
+# -----------------------------------------------------------------------------
+# FreeRTOS：hello_p4 实测 100 Hz
+# -----------------------------------------------------------------------------
+CONFIG_FREERTOS_HZ=100

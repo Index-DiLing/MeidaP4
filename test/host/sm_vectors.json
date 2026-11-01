@@ -1,0 +1,521 @@
+{
+ "schema": "meida-p4/proto-sm-vectors/1",
+ "generated_by": "test/host/gen_sm_vectors.py（verifier；按 docs/protocol.md §6 推导，不引用实现）",
+ "spec": "docs/protocol.md §6.1 / §6.3 / §6.4 / §6.5",
+ "time_policy": "时间只从 nowMs 参数进入；转移函数内部不得读时钟 / 起 timer / 用 setTimeout",
+ "interface": {
+  "reliableInit": "reliableInit() -> state",
+  "reliableStep": "reliableStep(state, event, nowMs) -> { state, actions }",
+  "linkInit": "linkInit() -> state",
+  "linkStep": "linkStep(state, event, nowMs) -> { state, actions }",
+  "state_schema": {
+   "reliable": {
+    "outstanding": "数组，元素至少含 {seq, retxCount, sentAtMs}",
+    "outstanding_len": "未确认帧数（派生视图，runner 会优先读它，缺失时用 outstanding.length）",
+    "outstanding_oldest_seq": "窗口内最老一帧的 seq（派生视图）",
+    "link_up": "bool",
+    "deliver_count_max": "累计向投递上层的数据帧数（幂等验证用）"
+   },
+   "link": {
+    "link_up": "bool",
+    "tx_seq": "u16",
+    "rx_expected": "u16",
+    "zero_len_reads": "u32",
+    "send_hello_count": "u32"
+   }
+  },
+  "event_vocabulary": {
+   "reliable": [
+    "tx_send{seq}",
+    "rx_ack{arg}",
+    "rx_data{seq}",
+    "tick"
+   ],
+   "link": [
+    "mount",
+    "rx_frame{valid,channel,seq}",
+    "rx_zero_read",
+    "rx_hello{arg,seq}",
+    "rx_hello_ack{seq}",
+    "tick"
+   ]
+  },
+  "action_vocabulary": [
+   "frame{seq,retx}",
+   "ack{arg}",
+   "link_up",
+   "link_down",
+   "reset_seqs",
+   "send_hello",
+   "deliver"
+  ]
+ },
+ "reliable": [
+  {
+   "name": "reliable/window_never_exceeds_8",
+   "notes": "§6.1：发送方最多 8 个未确认帧。连发 10 帧且无 ACK ⇒ 未确认数必须 <= 8（规约没写第 9 帧是阻塞还是丢弃，所以只断言不变量）",
+   "events": [
+    {
+     "at": 0,
+     "ev": "tx_send",
+     "seq": 0
+    },
+    {
+     "at": 1,
+     "ev": "tx_send",
+     "seq": 1
+    },
+    {
+     "at": 2,
+     "ev": "tx_send",
+     "seq": 2
+    },
+    {
+     "at": 3,
+     "ev": "tx_send",
+     "seq": 3
+    },
+    {
+     "at": 4,
+     "ev": "tx_send",
+     "seq": 4
+    },
+    {
+     "at": 5,
+     "ev": "tx_send",
+     "seq": 5
+    },
+    {
+     "at": 6,
+     "ev": "tx_send",
+     "seq": 6
+    },
+    {
+     "at": 7,
+     "ev": "tx_send",
+     "seq": 7
+    },
+    {
+     "at": 8,
+     "ev": "tx_send",
+     "seq": 8
+    },
+    {
+     "at": 9,
+     "ev": "tx_send",
+     "seq": 9
+    }
+   ],
+   "expect": {
+    "actions_contain": [],
+    "state": [
+     {
+      "path": "outstanding_len",
+      "max": 8
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "reliable/cumulative_ack_releases",
+   "notes": "§6.1：收到 arg=X ⇒ seq < X 的帧全部释放（累计确认）。发 0..3 后收 arg=2 ⇒ 只剩 2 帧、最老为 seq 2",
+   "events": [
+    {
+     "at": 0,
+     "ev": "tx_send",
+     "seq": 0
+    },
+    {
+     "at": 1,
+     "ev": "tx_send",
+     "seq": 1
+    },
+    {
+     "at": 2,
+     "ev": "tx_send",
+     "seq": 2
+    },
+    {
+     "at": 3,
+     "ev": "tx_send",
+     "seq": 3
+    },
+    {
+     "at": 10,
+     "ev": "rx_ack",
+     "arg": 2
+    }
+   ],
+   "expect": {
+    "actions_contain": [],
+    "state": [
+     {
+      "path": "outstanding_len",
+      "eq": 2
+     },
+     {
+      "path": "outstanding_oldest_seq",
+      "eq": 2
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "reliable/no_retx_before_200ms_retx_at_200ms",
+   "notes": "§6.1：超时 200 ms 未推进窗口 ⇒ 重传窗口内最老一帧并置 RETX。t=199 不得重传；t=200 必须重传 seq=0 且 retx=true",
+   "events": [
+    {
+     "at": 0,
+     "ev": "tx_send",
+     "seq": 0
+    },
+    {
+     "at": 199,
+     "ev": "tick"
+    },
+    {
+     "at": 200,
+     "ev": "tick"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "frame",
+      "seq": 0,
+      "retx": true
+     }
+    ],
+    "state": [],
+    "unordered": true
+   }
+  },
+  {
+   "name": "reliable/five_failures_then_link_down",
+   "notes": "§6.1：连续 5 次重传失败 ⇒ 清空该通道 TX 队列、置 link_down。只断言**最终态**（link_down + 队列清空）—— 规约没规定第 5 次失败落在哪个 tick，所以不对中间 tick 下结论（避免把某种实现 convention 当规约）",
+   "events": [
+    {
+     "at": 0,
+     "ev": "tx_send",
+     "seq": 0
+    },
+    {
+     "at": 200,
+     "ev": "tick"
+    },
+    {
+     "at": 400,
+     "ev": "tick"
+    },
+    {
+     "at": 600,
+     "ev": "tick"
+    },
+    {
+     "at": 800,
+     "ev": "tick"
+    },
+    {
+     "at": 1000,
+     "ev": "tick"
+    },
+    {
+     "at": 1200,
+     "ev": "tick"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "link_down"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": false
+     },
+     {
+      "path": "outstanding_len",
+      "eq": 0
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "reliable/duplicate_seq_is_idempotent",
+   "notes": "§6.1：接收方对重复 seq 必须幂等 —— 直接再回一次 ACK，不得把数据重复投递给上层。⇒ 必须出现 ack 动作，且不得出现 deliver 动作",
+   "events": [
+    {
+     "at": 0,
+     "ev": "rx_data",
+     "seq": 5
+    },
+    {
+     "at": 1,
+     "ev": "rx_data",
+     "seq": 5
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "ack"
+     }
+    ],
+    "state": [
+     {
+      "path": "deliver_count_max",
+      "eq": 1
+     }
+    ],
+    "unordered": true
+   }
+  }
+ ],
+ "link": [
+  {
+   "name": "link/hello_every_2s_until_hello_ack",
+   "notes": "§6.3：设备每 2 s 发 HELLO 直到收到 HELLO_ACK。挂载后 t=0/2000/4000/6000 ⇒至少 3 次 send_hello（0 时刻是否立刻发规约没写死，用下界 3 / 上界 4）",
+   "events": [
+    {
+     "at": 0,
+     "ev": "mount"
+    },
+    {
+     "at": 0,
+     "ev": "tick"
+    },
+    {
+     "at": 2000,
+     "ev": "tick"
+    },
+    {
+     "at": 4000,
+     "ev": "tick"
+    },
+    {
+     "at": 6000,
+     "ev": "tick"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "send_hello"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": false
+     },
+     {
+      "path": "send_hello_count",
+      "min": 3,
+      "max": 4
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "link/hello_ack_converges_and_resets_seqs",
+   "notes": "§6.3：设备收到 HELLO_ACK ⇒ 所有 TX seq 归 0、RX 期望值归 0、清空发送队列、link_up",
+   "events": [
+    {
+     "at": 0,
+     "ev": "mount"
+    },
+    {
+     "at": 0,
+     "ev": "tick"
+    },
+    {
+     "at": 10,
+     "ev": "rx_hello_ack"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "link_up"
+     },
+     {
+      "act": "reset_seqs"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": true
+     },
+     {
+      "path": "tx_seq",
+      "eq": 0
+     },
+     {
+      "path": "rx_expected",
+      "eq": 0
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "link/valid_frame_postpones_link_down",
+   "notes": "§6.3：连续 3 s 没收到任何**有效帧** ⇒ link_down。最后一次有效帧在 t=100 ⇒t=3099 仍 link_up、t=3100 必须 link_down",
+   "events": [
+    {
+     "at": 0,
+     "ev": "mount"
+    },
+    {
+     "at": 0,
+     "ev": "tick"
+    },
+    {
+     "at": 10,
+     "ev": "rx_hello_ack"
+    },
+    {
+     "at": 100,
+     "ev": "rx_frame",
+     "valid": true,
+     "channel": 0,
+     "seq": 0
+    },
+    {
+     "at": 3099,
+     "ev": "tick"
+    },
+    {
+     "at": 3100,
+     "ev": "tick"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "link_down"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": false
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "link/zero_length_reads_do_not_count_as_valid_frames",
+   "notes": "§4.1 + §6.3：0 字节 IN 读是**合法事件**但**不产生任何帧、不推进任何状态**。⇒ 每 500 ms 一次 0 字节读、连续 3 s，必须仍然 link_down（把 ZLP 当「链路活动」的实现会永远不掉线）",
+   "events": [
+    {
+     "at": 0,
+     "ev": "mount"
+    },
+    {
+     "at": 0,
+     "ev": "tick"
+    },
+    {
+     "at": 10,
+     "ev": "rx_hello_ack"
+    },
+    {
+     "at": 500,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 1000,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 1500,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 2000,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 2500,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 3000,
+     "ev": "rx_zero_read"
+    },
+    {
+     "at": 3100,
+     "ev": "tick"
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "link_down"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": false
+     },
+     {
+      "path": "zero_len_reads",
+      "min": 6
+     }
+    ],
+    "unordered": true
+   }
+  },
+  {
+   "name": "link/bootstrap_frames_bypass_seq_gate",
+   "notes": "⚠️ 引导期 seq 门豁免（两侧实现都做了：web/proto.js:784/884 与 webusb_proto.c:27-28/693），但**现行 docs/protocol.md 没有这一条**（§6.5 只有 ①–⑤）⇒ 本向量的规约依据待补。可观察结论：引导期设备发 HELLO(seq=0) 之后，主机回 HELLO_ACK(seq=0) 仍必须被接受并收敛到 link_up（若被 seq 门当重复帧顶掉，链路永远收敛不了）",
+   "events": [
+    {
+     "at": 0,
+     "ev": "mount"
+    },
+    {
+     "at": 0,
+     "ev": "tick"
+    },
+    {
+     "at": 5,
+     "ev": "rx_hello",
+     "arg": 1,
+     "seq": 0
+    },
+    {
+     "at": 6,
+     "ev": "rx_hello_ack",
+     "seq": 0
+    }
+   ],
+   "expect": {
+    "actions_contain": [
+     {
+      "act": "link_up"
+     }
+    ],
+    "state": [
+     {
+      "path": "link_up",
+      "eq": true
+     }
+    ],
+    "unordered": true
+   },
+   "requires_spec": "docs/protocol.md §6.5⑥（**当前文档缺失**；实现里存在，见 webusb_proto.c:27-28）"
+  }
+ ],
+ "spec_sha256": "eb1aa7ce0d509d02f208015a747ff1400c21c27bff78bd7a68da84561d98d065"
+}

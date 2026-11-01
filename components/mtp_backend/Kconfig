@@ -1,0 +1,26 @@
+menu "MTP backend (SD card as the only MTP volume)"
+
+    config MTP_BACKEND_MANUFACTURER
+        string "DeviceInfo manufacturer string"
+        default "MeidaP4"
+
+    config MTP_BACKEND_MODEL
+        string "DeviceInfo model string"
+        default "MeidaP4 SD Card"
+
+    config MTP_BACKEND_VERSION
+        string "DeviceInfo version string"
+        default "1.0.0"
+
+    config MTP_BACKEND_STORAGE_NAME
+        string "Storage / friendly name / MTP interface string"
+        default "MeidaP4 SD Card"
+        help
+            **一个符号同时决定三处**，这样主机的资源管理器里、MTP 存储属性里、
+            接口字符串里看到的名字永远一致：
+              1. `tinyusb_mtp_driver_config_t.friendly_name` —— Windows「便携设备」列表里显示的名字；
+              2. `tinyusb_mtp_storage_config_t.display_name` —— MTP 存储节点的名字；
+              3. `usb_function_t.itf_string` —— IF0 的 iInterface（frozen-allocation §4 的 idx 5）。
+            ⚠️ 改了它就得同步 docs/contracts/frozen-allocation.md §4 的字符串表（该表已用满 8 条）。
+
+endmenu

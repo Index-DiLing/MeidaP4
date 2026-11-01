@@ -1,0 +1,4963 @@
+<!--
+  MeidaP4 · WebUSB 单文件网页应用（视频画面 / TF 卡文件浏览 / LOG / 遥测）
+
+  ⚠️ 本文件由 tools/build_web.py 自动生成，请勿手改。
+     改源码 → web/app_src/**，然后重新运行：python tools/build_web.py
+     校验 app.html 是否与源码同步：python tools/build_web.py --check
+
+  为什么是单文件：页面要从 SD 卡以 file:// 双击打开，而 file:// 下
+    Chrome 禁止加载外部 ES module / 外部脚本 / 外部样式，也不允许 fetch 本地文件。
+  web/proto.js 与 web/file.js 是冻结的权威实现，此处内联的是它们的
+  strip_module() 镜像（只删 import/export 语法，其余逐字节保留）。
+  web/app_src/selftest.mjs 会重新计算并断言逐字节一致。
+
+  内联清单（按依赖顺序）：
+  web/proto.js                       id=wu-proto-inline  sha256=fd359d3fa695d566   33064 B
+  web/file.js                        id=wu-file-inline   sha256=7c90334fff3934ad   18099 B
+  web/app_src/js/05_bridge.js        id=app-bridge       sha256=613cd8829ce94d47    3474 B
+  web/app_src/js/10_util.js          id=app-util         sha256=8bdb6ebaa0d9823f    6176 B
+  web/app_src/js/20_usb.js           id=app-usb          sha256=48404aaf60b01849   19780 B
+  web/app_src/js/30_link.js          id=app-link         sha256=316e89a182ab3598    8833 B
+  web/app_src/js/40_video.js         id=app-video        sha256=8dcd8b2ab3347e2a   12662 B
+  web/app_src/js/50_files.js         id=app-files        sha256=b6c2ce4fb56e57e7   13559 B
+  web/app_src/js/60_ui.js            id=app-ui           sha256=77a9249e63cfde41   31120 B
+  web/app_src/js/90_boot.js          id=app-boot         sha256=111b6f8522de62ea    1299 B
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>MeidaP4 控制台 · WebUSB 视频 / TF 卡</title>
+<style>
+
+/* ============================================================================
+ * MeidaP4 控制台 · 样式（深色主题，原生 CSS，无外部依赖）
+ * 由 tools/build_web.py 内联进 web/app.html
+ * ========================================================================== */
+
+:root {
+  --bg: #0a0e15;
+  --bg-2: #0f1522;
+  --panel: #111a29;
+  --panel-2: #16213442;
+  --line: #22304a;
+  --line-soft: #1a2436;
+  --text: #dce6f5;
+  --muted: #8ba0bd;
+  --dim: #6c7f9c;
+  --accent: #4da3ff;
+  --accent-2: #7cc4ff;
+  --ok: #3ddc97;
+  --warn: #f5c451;
+  --err: #ff6b6b;
+  --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", "Consolas", "Noto Sans Mono CJK SC", monospace;
+  --sans: "Segoe UI", "Microsoft YaHei UI", "Noto Sans CJK SC", system-ui, sans-serif;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #14263d 0%, transparent 60%),
+    radial-gradient(900px 500px at 110% 0%, #1b1630 0%, transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  min-height: 100%;
+}
+
+/* ---------------------------------------------------------------- 顶栏 */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  background: #0b111ccc;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(150deg, #2f6dff, #7c3aed 55%, #14b8a6);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: .5px;
+  font-size: 15px;
+  box-shadow: 0 6px 18px #2f6dff33;
+  flex: none;
+}
+
+.brand-text { min-width: 0; }
+.brand-text h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .2px; }
+.brand-text p { margin: 1px 0 0; font-size: 11.5px; color: var(--dim); }
+
+.conn { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #0e1725;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #45566f;
+  flex: none;
+}
+.pill.ok { color: var(--ok); border-color: #1d5a44; background: #0d251d; }
+.pill.ok::before { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.pill.warn { color: var(--warn); border-color: #5c4818; background: #241d0b; }
+.pill.warn::before { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.pill.err { color: var(--err); border-color: #5e2323; background: #250f0f; }
+.pill.err::before { background: var(--err); box-shadow: 0 0 8px var(--err); }
+
+/* ---------------------------------------------------------------- 按钮 */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: #16223a;
+  color: var(--text);
+  padding: 7px 13px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .12s, border-color .12s, transform .05s;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: #1d2c49; border-color: #2f4468; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .42; cursor: not-allowed; }
+.btn.primary { background: linear-gradient(180deg, #2f7bff, #1f5ad6); border-color: #3d84ff; color: #fff; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: linear-gradient(180deg, #3d89ff, #2463e0); }
+.btn.accent { border-color: #2b6a4d; background: #0f2a20; color: #8df0c0; }
+.btn.accent:hover:not(:disabled) { background: #14382a; }
+.btn.danger { border-color: #5e2323; background: #241012; color: #ffb4b4; }
+.btn.danger:hover:not(:disabled) { background: #31161a; }
+.btn.small { padding: 6px 10px; font-size: 12px; }
+.btn.tiny { padding: 4px 9px; font-size: 11.5px; }
+
+/* ---------------------------------------------------------------- 布局 */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "video status"
+    "log   files";
+  gap: 14px;
+  padding: 14px 18px 6px;
+  align-items: start;
+}
+
+.video-card { grid-area: video; }
+.status-card { grid-area: status; }
+.log-card { grid-area: log; }
+.files-card { grid-area: files; }
+
+.card {
+  background: linear-gradient(180deg, #111a29, #0d1523);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 12px 14px 14px;
+  box-shadow: 0 10px 30px #00000030;
+  min-width: 0;
+}
+
+.card-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.card-h h2 { margin: 0; font-size: 13.5px; font-weight: 650; letter-spacing: .3px; }
+.card-tools { display: flex; align-items: center; gap: 8px; }
+
+.dim { color: var(--dim); font-size: 12px; }
+
+/* ---------------------------------------------------------------- 视频 */
+.canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background:
+    linear-gradient(180deg, #05070c, #070b12),
+    repeating-conic-gradient(#0b111b 0% 25%, #080d15 0% 50%) 50% / 24px 24px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+#video-canvas { display: block; width: 100%; height: 100%; }
+.canvas-wrap.empty #video-canvas { display: none; }
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  pointer-events: none;
+}
+.canvas-wrap.empty .placeholder { display: flex; }
+.placeholder .ph-icon {
+  font-size: 30px;
+  color: #2b4a72;
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #2b4a72;
+  border-radius: 50%;
+  margin-bottom: 6px;
+}
+.placeholder p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.placeholder p.dim { font-size: 11.5px; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.stat {
+  background: #0c1421;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 7px 8px;
+  text-align: center;
+  min-width: 0;
+}
+.stat b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: #cfe4ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat span { display: block; font-size: 10.5px; color: var(--dim); margin-top: 1px; }
+.hintline { margin-top: 8px; font-size: 11px; color: var(--dim); font-family: var(--mono); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- 状态 */
+.telem-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+.telem-grid > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed var(--line-soft);
+  padding: 3px 0;
+  min-width: 0;
+}
+.telem-grid span { color: var(--dim); font-size: 11.5px; white-space: nowrap; }
+.telem-grid b {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfe4ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.counters span {
+  font-size: 11px;
+  color: var(--muted);
+  background: #0c1421;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.counters b { color: #cfe4ff; font-family: var(--mono); font-weight: 600; }
+
+.row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+
+.help {
+  margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.help summary { cursor: pointer; color: var(--accent-2); font-size: 12px; }
+.help ol { margin: 8px 0 0; padding-left: 18px; }
+.help li { margin: 4px 0; line-height: 1.5; }
+.help code, .tiny-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: #0a1220;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* ---------------------------------------------------------------- LOG */
+.log {
+  height: 260px;
+  overflow: auto;
+  background: #070b12;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  scrollbar-width: thin;
+}
+.log .ln { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log .ln .ts { color: #4b5f7d; margin-right: 7px; }
+.log .ln.info { color: #b9cbe3; }
+.log .ln.ok { color: #7ee2b0; }
+.log .ln.warn { color: #f2cf7a; }
+.log .ln.err { color: #ff9a9a; }
+.log .ln.dev { color: #9db9e0; }
+.log .ln.rx { color: #86a9d6; }
+.log .ln.tx { color: #b0a0e0; }
+
+.chk { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); cursor: pointer; }
+.chk input { accent-color: var(--accent); }
+
+/* ---------------------------------------------------------------- 文件 */
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 24px;
+  padding: 4px 6px;
+  background: #0a1220;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+.crumbs .crumb {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent-2);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 4px;
+}
+.crumbs .crumb:hover { background: #182741; }
+.crumbs .sep { color: var(--dim); }
+.crumbs .cur { color: var(--text); font-weight: 600; }
+
+.files-toolbar { display: flex; flex-wrap: wrap; gap: 7px; margin: 9px 0 6px; }
+.files-status { min-height: 17px; margin-bottom: 6px; overflow-wrap: anywhere; }
+.files-status.busy::after { content: " …"; }
+
+.table-wrap {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  scrollbar-width: thin;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #0e1725;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: left;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+}
+thead th.num, tbody td.num { text-align: right; font-family: var(--mono); }
+thead th.act, tbody td.act { text-align: right; width: 128px; }
+tbody td { padding: 5px 9px; border-bottom: 1px solid #16203380; }
+tbody tr:hover { background: #14203340; }
+tbody tr.selected { background: #14304d99; }
+tbody td.name { cursor: pointer; }
+tbody td.name .ico { display: inline-block; width: 17px; color: var(--warn); }
+tbody td.name .ico.file { color: #6f9fd8; }
+tbody td.name .nm { overflow-wrap: anywhere; }
+tbody td.act .btn { margin-left: 4px; }
+tbody td.empty { padding: 14px 10px; color: var(--dim); text-align: center; font-size: 12px; }
+
+.tiny-note { margin: 8px 0 0; line-height: 1.5; }
+
+/* ---------------------------------------------------------------- 消息 */
+.messages {
+  margin: 4px 18px 18px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: #0d1523c0;
+  padding: 8px 12px 10px;
+}
+.msg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dim);
+  font-size: 11.5px;
+  margin-bottom: 4px;
+}
+.msg-list { display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow: auto; }
+.msg-list .m {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border-left: 3px solid var(--line);
+  background: #0a1220;
+  overflow-wrap: anywhere;
+}
+.msg-list .m.info { border-color: #2f6dff; color: #b9cbe3; }
+.msg-list .m.ok { border-color: var(--ok); color: #9beccb; }
+.msg-list .m.warn { border-color: var(--warn); color: #f4d99a; }
+.msg-list .m.err { border-color: var(--err); color: #ffb3b3; }
+.msg-list .m time { color: #4b5f7d; margin-right: 6px; font-family: var(--mono); font-size: 11px; }
+
+.boot-error {
+  margin: 12px 18px;
+  padding: 12px;
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  background: #1c0d0f;
+  color: #ffc9c9;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------------- 响应式 */
+@media (max-width: 1180px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas:
+      "video"
+      "status"
+      "log"
+      "files";
+  }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .topbar { padding: 8px 12px; }
+  .layout { padding: 10px 12px 4px; gap: 10px; }
+  .messages { margin: 4px 12px 14px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .telem-grid { grid-template-columns: minmax(0, 1fr); }
+  .log { height: 200px; }
+}
+
+/* 滚动条（Chromium） */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: #0a1018; }
+::-webkit-scrollbar-thumb { background: #22304a; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #2d4162; }
+
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">MP</span>
+    <div class="brand-text">
+      <h1>MeidaP4 控制台</h1>
+      <p>WebUSB · 视频画面 / TF 卡文件 / LOG / 遥测</p>
+    </div>
+  </div>
+  <div class="conn">
+    <span class="pill" id="pill-usb" title="WebUSB 设备与接口状态">USB 未连接</span>
+    <span class="pill" id="pill-link" title="I0 链路（HELLO / PING）状态">链路 —</span>
+    <span class="pill" id="pill-video" title="视频通道状态">视频 —</span>
+    <button class="btn primary" id="btn-connect">连接设备</button>
+    <button class="btn" id="btn-disconnect" disabled>断开</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============================ 视频画面 ============================ -->
+  <section class="card video-card">
+    <div class="card-h">
+      <h2>视频画面</h2>
+      <span class="dim" id="video-hint">等待连接…</span>
+    </div>
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="video-canvas"></canvas>
+      <div class="placeholder" id="canvas-placeholder">
+        <div class="ph-icon">▶</div>
+        <p>尚未收到视频帧</p>
+        <p class="dim">点右上角「连接设备」→ Chrome 弹窗里选中 MeidaP4 Composite</p>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="v-res">—</b><span>分辨率</span></div>
+      <div class="stat"><b id="v-fps">—</b><span>帧率</span></div>
+      <div class="stat"><b id="v-kbps">—</b><span>码率</span></div>
+      <div class="stat"><b id="v-avg">—</b><span>平均帧字节</span></div>
+      <div class="stat"><b id="v-drop">—</b><span>丢帧</span></div>
+      <div class="stat"><b id="v-dec">—</b><span>已解码</span></div>
+    </div>
+    <div class="hintline" id="v-hdr">视频头：—</div>
+  </section>
+
+  <!-- ============================ 设备状态 ============================ -->
+  <section class="card status-card">
+    <div class="card-h">
+      <h2>设备状态</h2>
+      <span class="dim" id="status-hint">等待 HELLO / TELEM（36 B 定长）</span>
+    </div>
+    <div class="telem-grid">
+      <div><span>运行时间</span><b id="t-uptime">—</b></div>
+      <div><span>空闲堆</span><b id="t-heap">—</b></div>
+      <div><span>空闲 PSRAM</span><b id="t-psram">—</b></div>
+      <div><span>USB 接收</span><b id="t-in">—</b></div>
+      <div><span>USB 发送</span><b id="t-out">—</b></div>
+      <div><span>视频码率</span><b id="t-kbps">—</b></div>
+      <div><span>视频丢帧</span><b id="t-drop">—</b></div>
+      <div><span>视频 FPS</span><b id="t-fps">—</b></div>
+      <div><span>TF 卡</span><b id="t-sd">—</b></div>
+      <div><span>Wi-Fi</span><b id="t-wifi">—</b></div>
+    </div>
+    <div class="counters" id="diag">
+      <span>帧 <b id="d-frames">0</b></span>
+      <span>零长读 <b id="d-zlp">0</b></span>
+      <span>CRC 错 <b id="d-crc">0</b></span>
+      <span>重同步 <b id="d-resync">0</b> B</span>
+      <span>坏帧头 <b id="d-bad">0</b></span>
+      <span>重传 <b id="d-retx">0</b></span>
+      <span>窗口占用 <b id="d-win">0</b></span>
+      <span>文件事务 <b id="d-file">0</b></span>
+    </div>
+    <div class="row">
+      <button class="btn small" id="btn-ping">发 PING</button>
+      <span class="dim" id="ping-result">—</span>
+    </div>
+    <details class="help">
+      <summary>使用步骤 / 排障</summary>
+      <ol>
+        <li>USB 线插到 P4 的 <b>高速口</b>，等设备枚举完成（资源管理器里出现 MeidaP4 的 MTP 卷）。</li>
+        <li>点「连接设备」→ Chrome 弹窗里选中 <b>MeidaP4 Composite</b>（VID 303A / PID 4103）→ 允许。</li>
+        <li>页面会自动 claim <b>IF1（视频 EP 0x83 IN）</b> 与 <b>IF2（控制 EP 0x84 IN / 0x04 OUT）</b>，
+            然后等设备发 <code>HELLO</code>；收到后自动回 <code>HELLO_ACK</code> 并开始出画面。</li>
+        <li>claim IF1 失败 ⇒ 固件这一版没把 IF1 绑到 WinUSB（WCID）：换 Lead 刚烧的固件、
+            <b>拔插一次</b>、并关闭其它占用该设备的 Chrome 标签页。</li>
+        <li>RFC 提醒：只有 Chrome / Edge（Chromium）支持 WebUSB；Firefox / Safari 没有 <code>navigator.usb</code>。</li>
+      </ol>
+    </details>
+  </section>
+
+  <!-- ============================ LOG 终端 ============================ -->
+  <section class="card log-card">
+    <div class="card-h">
+      <h2>LOG 终端</h2>
+      <div class="card-tools">
+        <label class="chk"><input type="checkbox" id="chk-autoscroll" checked> 自动滚动</label>
+        <button class="btn tiny" id="btn-log-clear">清屏</button>
+      </div>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <!-- ============================ TF 卡文件 ============================ -->
+  <section class="card files-card">
+    <div class="card-h">
+      <h2>TF 卡文件</h2>
+      <div class="card-tools">
+        <button class="btn tiny" id="btn-files-refresh">刷新</button>
+        <button class="btn tiny" id="btn-files-up">上级</button>
+      </div>
+    </div>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="files-toolbar">
+      <button class="btn small" id="btn-upload">上传文件…</button>
+      <input type="file" id="file-input" multiple hidden>
+      <button class="btn small" id="btn-newdir">新建目录</button>
+      <button class="btn small" id="btn-rename" disabled>重命名</button>
+      <button class="btn small danger" id="btn-delete" disabled>删除</button>
+      <button class="btn small accent" id="btn-write-test">一键写入 PC2P4.TXT</button>
+    </div>
+    <div class="dim files-status" id="files-status">未连接（或尚未握手）</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>名字</th><th class="num">大小</th><th>类型</th><th class="act">操作</th></tr>
+        </thead>
+        <tbody id="file-list"></tbody>
+      </table>
+    </div>
+    <p class="dim tiny-note">
+      LIST 按协议翻页：<code>LIST_REQ.offset</code> = 起始条目序号，每响应 ≤3 条（261 B/条），
+      主机递增 offset 直到 0 条或 &lt;3 条。
+    </p>
+  </section>
+
+</main>
+
+<footer class="messages" id="messages" aria-live="polite">
+  <div class="msg-head"><span>提示 / 错误</span><button class="btn tiny" id="btn-msg-clear">清空</button></div>
+  <div class="msg-list" id="msg-list"></div>
+</footer>
+
+<pre id="boot-error" class="boot-error" style="display:none"></pre>
+
+<!-- @source web/proto.js | sha256=fd359d3fa695d5663cc097771b902f62ef2e9ed7f8967e730c9524742832953b | generated by tools/build_web.py -->
+<script id="wu-proto-inline">
+'use strict';
+// [内联镜像 of web/proto.js] 由 tools/build_web.py 生成，请勿手改
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · I0 线协议编解码器（主机侧 / JS）—— 实现
+//
+// 规约：docs/protocol.md（帧头 12 字节小端 / 通道 / flags / CRC-16-CCITT-FALSE /
+//       ZLP / 窗口 W=8 + ACK + 200 ms 重传 ×5 / HELLO·HELLO_ACK / 3 s link_down）
+// 对照实现：components/webusb_proto/wu_codec.c（**必须逐字节一致**，由 tools/proto_vectors.json
+//       + tools/verify-proto.ps1 双向校验）
+//
+// ⚠️ 本文件是 **ES module**，且**不依赖任何 DOM / 外部资源** —— `node --input-type=module -e
+//    "import('./web/proto.js').then(...)"` 必须能直接跑（离线验收链第 3 步）。
+//    ⚠️ `file://` 下浏览器**禁止** ES module 跨文件加载（CORS/opaque origin），所以
+//    `web/index.html` **不 import 本文件**：它内联了一份逐字节相同的实现（见 index.html 里
+//    `id="wu-proto-inline"` 的脚本块），由 `web/selfcheck.mjs` 做等价性回归。
+//    改本文件 = 必须同步改 index.html 的内联块，否则 selfcheck.mjs 会失败。
+//
+// 与 C 侧的行为口径（协议 §6.4）：
+//   * magic/version/length 非法 ⇒ 从下一个字节起重新扫 `4D 50`；候选帧头本身归 badHeader，
+//     其余被跳过的字节归 resyncBytes（两者都**不依赖喂入粒度**）；
+//   * CRC 失败 ⇒ 丢该帧（crcErrors++）并从该帧之后继续（绝不从帧内重扫）；
+//   * 0 字节输入（ZLP）是合法 no-op —— 不产生帧、不推进任何状态。
+
+/* ============================ 常量（协议冻结值） ============================ */
+
+/** 小端读出的 magic 值；字节序为 `4D 50`（ASCII "MP"） */
+const MAGIC = 0x504D;
+const MAGIC0 = 0x4D;
+const MAGIC1 = 0x50;
+const VERSION = 0x01;
+const HDR_LEN = 12;
+const MAX_PAYLOAD = 1024;
+const MAX_FRAME = HDR_LEN + MAX_PAYLOAD; // 1036
+
+const CHANNEL = { CTRL: 0, VIDEO: 1, FILE: 2, LOG: 3, TELEM: 4 };
+const CHANNEL_NAMES = ['CTRL', 'VIDEO', 'FILE', 'LOG', 'TELEM'];
+const CHANNEL_MAX = 5;
+
+const FLAGS = { MORE: 0x0001, ACK: 0x0002, RETX: 0x0004, ABORT: 0x0008 };
+
+const OP = {
+  HELLO: 0x01,
+  HELLO_ACK: 0x02,
+  PING: 0x03,
+  PONG: 0x04,
+  ACK: 0x05,
+  CREDIT: 0x06,
+  WIFI_SCAN: 0x10,
+  WIFI_SCAN_RSP: 0x11,
+  WIFI_CONNECT: 0x12,
+  WIFI_STATUS: 0x13,
+  UI_CMD: 0x20,
+  STATS_REQ: 0x40,
+  STATS_RSP: 0x41,
+};
+const OP_NAMES = {
+  0x01: 'HELLO', 0x02: 'HELLO_ACK', 0x03: 'PING', 0x04: 'PONG', 0x05: 'ACK', 0x06: 'CREDIT',
+  0x10: 'WIFI_SCAN', 0x11: 'WIFI_SCAN_RSP', 0x12: 'WIFI_CONNECT', 0x13: 'WIFI_STATUS',
+  0x20: 'UI_CMD', 0x40: 'STATS_REQ', 0x41: 'STATS_RSP',
+};
+
+const STATUS = {
+  OK: 0x00, EINVAL: 0x01, ENOENT: 0x02, EIO: 0x03,
+  ENOSPC: 0x04, EBUSY: 0x05, ENOTSUP: 0x06, EUNKNOWN: 0x7F,
+};
+const STATUS_NAMES = ['OK', 'EINVAL', 'ENOENT', 'EIO', 'ENOSPC', 'EBUSY', 'ENOTSUP'];
+
+const CAP = {
+  VIDEO_MJPEG: 1 << 0, VIDEO_H264: 1 << 1, FILE: 1 << 2, LOG: 1 << 3,
+  TELEM: 1 << 4, WIFI: 1 << 5, UI_CMD: 1 << 6,
+};
+
+const FILE_OP = {
+  LIST_REQ: 0, LIST_RSP: 1, OPEN_REQ: 2, OPEN_RSP: 3, READ_REQ: 4, READ_RSP: 5,
+  WRITE_REQ: 6, WRITE_RSP: 7, CLOSE_REQ: 8, CLOSE_RSP: 9, DELETE: 10, MKDIR: 11, RENAME: 12,
+};
+const FILE_OP_NAMES = [
+  'LIST_REQ', 'LIST_RSP', 'OPEN_REQ', 'OPEN_RSP', 'READ_REQ', 'READ_RSP',
+  'WRITE_REQ', 'WRITE_RSP', 'CLOSE_REQ', 'CLOSE_RSP', 'DELETE', 'MKDIR', 'RENAME',
+];
+
+const PROTO_VERSION = 0x01;      // HELLO 的 arg
+const CTRL_HDR_LEN = 4;          // §5.1
+const FILE_HDR_LEN = 8;          // §5.3
+const VIDEO_HDR_LEN = 16;        // §5.2
+const TELEM_LEN = 36;            // §5.4
+
+const WINDOW = 8;                // §6.1 滑动窗口
+const ACK_TIMEOUT_MS = 200;      // §6.1 重传超时
+const MAX_RETX = 5;              // §6.1 连续重传失败上限
+const LINK_DOWN_MS = 3000;       // §6.3 连续 3 s 无有效帧
+const HELLO_PERIOD_MS = 2000;    // §6.3 设备侧周期（主机侧只用于诊断显示）
+const PING_PERIOD_MS = 1000;     // §5.4 心跳节奏
+const TELEM_PERIOD_MS = 1000;    // §5.4
+
+/** 通道语义表（哪条通道可靠、走哪个端点），供 UI 显示；端点号由 usb_fn_alloc_t 决定，不在这里硬编码 */
+const CHANNEL_INFO = {
+  0: { name: 'CTRL', reliable: true, ep: 'ctrl' },
+  1: { name: 'VIDEO', reliable: false, ep: 'video' },
+  2: { name: 'FILE', reliable: true, ep: 'ctrl' },
+  3: { name: 'LOG', reliable: false, ep: 'ctrl' },
+  4: { name: 'TELEM', reliable: false, ep: 'ctrl' },
+};
+
+/* ============================ 小工具 ============================ */
+
+/** 把各种"字节样"输入统一成 Uint8Array（不复制视图；hex 字符串会被解析） */
+function toBytes(x) {
+  if (x === null || x === undefined) return new Uint8Array(0);
+  if (x instanceof Uint8Array) return x;
+  if (ArrayBuffer.isView(x)) return new Uint8Array(x.buffer, x.byteOffset, x.byteLength);
+  if (x instanceof ArrayBuffer) return new Uint8Array(x);
+  if (Array.isArray(x)) return Uint8Array.from(x);
+  if (typeof x === 'string') return hexToBytes(x);
+  throw new TypeError('无法把该值当作字节序列：' + Object.prototype.toString.call(x));
+}
+
+function hexToBytes(hex) {
+  const s = String(hex).replace(/[\s,_]/g, '').replace(/^0x/i, '');
+  if (s.length % 2 !== 0) throw new Error('hex 长度必须是偶数：' + s.length);
+  const out = new Uint8Array(s.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    const b = parseInt(s.substr(i * 2, 2), 16);
+    if (Number.isNaN(b)) throw new Error('非法 hex 字节：' + s.substr(i * 2, 2));
+    out[i] = b;
+  }
+  return out;
+}
+
+function bytesToHex(bytes) {
+  const b = toBytes(bytes);
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
+  return s;
+}
+
+function utf8ToBytes(str) {
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+  const out = [];
+  for (let i = 0; i < str.length; i++) {  // 仅兜底：非 BMP 字符不保证正确
+    const c = str.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 0x3F));
+    else out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+  }
+  return Uint8Array.from(out);
+}
+
+function bytesToUtf8(bytes) {
+  const b = toBytes(bytes);
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8', { fatal: false }).decode(b);
+  }
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return s;
+}
+
+/** 小端读 u16 / u32 */
+function rd16(b, off) { return (b[off] | (b[off + 1] << 8)) & 0xFFFF; }
+function rd32(b, off) {
+  return ((b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24)) >>> 0);
+}
+function wr16(b, off, v) { b[off] = v & 0xFF; b[off + 1] = (v >> 8) & 0xFF; }
+function wr32(b, off, v) {
+  b[off] = v & 0xFF; b[off + 1] = (v >>> 8) & 0xFF; b[off + 2] = (v >>> 16) & 0xFF; b[off + 3] = (v >>> 24) & 0xFF;
+}
+
+/* ============================ CRC ============================ */
+
+/**
+ * CRC-16/CCITT-FALSE：poly=0x1021 / init=0xFFFF / refin=false / refout=false / xorout=0。
+ * 与 C 侧 `wu_crc16()` 逐字节一致。
+ *
+ * @param {Uint8Array|ArrayBuffer|number[]|string} bytes
+ * @param {number} [start=0]
+ * @param {number} [end=bytes.length]
+ * @returns {number} 0..65535
+ */
+function crc16(bytes, start = 0, end = undefined) {
+  const b = toBytes(bytes);
+  const from = start | 0;
+  const to = (end === undefined) ? b.length : end;
+  let crc = 0xFFFF;
+  for (let i = from; i < to; i++) {
+    crc ^= (b[i] & 0xFF) << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc & 0x8000) ? (((crc << 1) ^ 0x1021) & 0xFFFF) : ((crc << 1) & 0xFFFF);
+    }
+  }
+  return crc & 0xFFFF;
+}
+
+/**
+ * 协议 §2 的 crc16 字段口径：先喂 hdr[0..10)，再喂 payload。
+ * 等价于 C 侧 `wu_frame_crc()`。
+ */
+function crc16OfFrame(hdrFirst10, payload) {
+  let crc = 0xFFFF;
+  const h = toBytes(hdrFirst10);
+  for (let i = 0; i < 10; i++) {
+    crc ^= (h[i] & 0xFF) << 8;
+    for (let bit = 0; bit < 8; bit++) crc = (crc & 0x8000) ? (((crc << 1) ^ 0x1021) & 0xFFFF) : ((crc << 1) & 0xFFFF);
+  }
+  const p = toBytes(payload);
+  for (let i = 0; i < p.length; i++) {
+    crc ^= (p[i] & 0xFF) << 8;
+    for (let bit = 0; bit < 8; bit++) crc = (crc & 0x8000) ? (((crc << 1) ^ 0x1021) & 0xFFFF) : ((crc << 1) & 0xFFFF);
+  }
+  return crc & 0xFFFF;
+}
+
+/* ============================ 编码 ============================ */
+
+/**
+ * 编码一帧（协议 §2）。
+ *
+ * @param {{channel:number, flags?:number, seq?:number, payload?:any}} o
+ * @returns {Uint8Array} 12 + payload 字节
+ */
+function encodeFrame(o) {
+  const opts = o || {};
+  const channel = opts.channel | 0;
+  const flags = (opts.flags === undefined ? 0 : opts.flags) & 0xFFFF;
+  const seq = (opts.seq === undefined ? 0 : opts.seq) & 0xFFFF;
+  const payload = toBytes(opts.payload);
+  if (payload.length > MAX_PAYLOAD) {
+    throw new RangeError('payload 超过 WU_MAX_PAYLOAD=' + MAX_PAYLOAD + '：' + payload.length);
+  }
+  const out = new Uint8Array(HDR_LEN + payload.length);
+  out[0] = MAGIC0;
+  out[1] = MAGIC1;
+  out[2] = VERSION;
+  out[3] = channel & 0xFF;
+  wr16(out, 4, flags);
+  wr16(out, 6, payload.length);
+  wr16(out, 8, seq);
+  wr16(out, 10, crc16OfFrame(out.subarray(0, 10), payload));
+  out.set(payload, HDR_LEN);
+  return out;
+}
+
+/** 把一条消息切成帧（协议 §4）。返回帧数组；`retx` 会置 RETX 位。 */
+function fragmentMessage(channel, msg, seq0, opts = {}) {
+  const body = toBytes(msg);
+  const wantAck = opts.ack !== false && !!(CHANNEL_INFO[channel] && CHANNEL_INFO[channel].reliable);
+  const total = body.length === 0 ? 1 : Math.ceil(body.length / MAX_PAYLOAD);
+  const frames = [];
+  let seq = seq0 & 0xFFFF;
+  for (let i = 0; i < total; i++) {
+    let flags = 0;
+    if (wantAck) flags |= FLAGS.ACK;
+    if (i + 1 < total) flags |= FLAGS.MORE;
+    if (opts.retx) flags |= FLAGS.RETX;
+    const off = i * MAX_PAYLOAD;
+    const chunk = body.subarray(off, Math.min(off + MAX_PAYLOAD, body.length));
+    frames.push({ seq, flags, bytes: encodeFrame({ channel, flags, seq, payload: chunk }) });
+    seq = (seq + 1) & 0xFFFF;
+  }
+  return frames;
+}
+
+/* ============================ 解码（流式） ============================ */
+
+function findMagic(p, from, avail) {
+  for (let k = from; k + 1 < avail; k++) {
+    if (p[k] === MAGIC0 && p[k + 1] === MAGIC1) return k;
+  }
+  return avail; // 未找到
+}
+
+/**
+ * 流式解码器（协议 §6.4 / §4.1）。与 C 侧 `wu_decoder_push()` 行为一致。
+ *
+ * `stats` **只**暴露协议 §7 冻结的三个字段：`{crcErrors, resyncBytes, frames}`。
+ * 额外诊断量（badHeader / truncated）走 `diagnostics`，避免宿主写死 stats 形状时踩坑。
+ */
+class FrameDecoder {
+  constructor() {
+    this._buf = new Uint8Array(MAX_FRAME);
+    this._len = 0;
+    this._stats = { crcErrors: 0, resyncBytes: 0, frames: 0, badHeader: 0, truncated: 0 };
+  }
+
+  /** 协议 §7 冻结形状 */
+  get stats() {
+    return { crcErrors: this._stats.crcErrors, resyncBytes: this._stats.resyncBytes, frames: this._stats.frames };
+  }
+
+  /** 诊断扩展（C 侧 wu_decoder_stats_t 的另外两个字段） */
+  get diagnostics() {
+    return {
+      crcErrors: this._stats.crcErrors, resyncBytes: this._stats.resyncBytes, frames: this._stats.frames,
+      badHeader: this._stats.badHeader, truncated: this._stats.truncated,
+    };
+  }
+
+  reset() {
+    this._len = 0;
+    this._stats = { crcErrors: 0, resyncBytes: 0, frames: 0, badHeader: 0, truncated: 0 };
+  }
+
+  _consume(n, countAsResync) {
+    if (n > this._len) n = this._len;
+    if (n <= 0) return;
+    if (countAsResync) this._stats.resyncBytes += n;
+    this._buf.copyWithin(0, n, this._len);
+    this._len -= n;
+  }
+
+  /**
+   * 喂入字节，解出尽可能多的帧。
+   * @param {any} bytes
+   * @returns {Array<{channel:number, flags:number, seq:number, length:number, payload:Uint8Array}>}
+   */
+  push(bytes) {
+    const frames = [];
+    if (bytes === null || bytes === undefined) return frames;
+    const src = toBytes(bytes);
+    if (src.length === 0) return frames; // ZLP / 0 字节：合法 no-op（§4.1）
+    let pos = 0;
+
+    for (;;) {
+      const space = MAX_FRAME - this._len;
+      let chunk = src.length - pos;
+      if (space !== 0 && chunk !== 0) {
+        if (chunk > space) chunk = space;
+        this._buf.set(src.subarray(pos, pos + chunk), this._len);
+        this._len += chunk;
+        pos += chunk;
+      }
+
+      for (;;) {
+        const avail = this._len;
+        const p = this._buf;
+
+        if (avail < 2) {
+          if (avail === 1 && p[0] !== MAGIC0) { this._consume(1, true); continue; }
+          this._stats.truncated++;
+          break;
+        }
+
+        if (p[0] !== MAGIC0 || p[1] !== MAGIC1) {
+          const k = findMagic(p, 1, avail);
+          if (k >= avail) {
+            const drop = (p[avail - 1] === MAGIC0) ? (avail - 1) : avail;
+            this._consume(drop, true);
+            this._stats.truncated++;
+            break;
+          }
+          this._consume(k, true);
+          continue;
+        }
+
+        if (avail < HDR_LEN) { this._stats.truncated++; break; }
+
+        const version = p[2];
+        const length = p[6] | (p[7] << 8);
+        if (version !== VERSION || length > MAX_PAYLOAD) {
+          // 候选帧头非法：候选头本身归 badHeader，其余跳过的字节归 resyncBytes
+          // （两者都不依赖喂入粒度，见文件头注释）
+          this._stats.badHeader++;
+          const k = findMagic(p, 1, avail);
+          const skip = (k >= avail) ? ((p[avail - 1] === MAGIC0) ? (avail - 1) : avail) : k;
+          const uncounted = Math.min(skip, HDR_LEN);
+          this._consume(uncounted, false);
+          this._consume(skip - uncounted, true);
+          if (k >= avail) { this._stats.truncated++; break; }
+          continue;
+        }
+
+        const need = HDR_LEN + length;
+        if (avail < need) { this._stats.truncated++; break; }
+
+        const crcWire = p[10] | (p[11] << 8);
+        const crcCalc = crc16OfFrame(p.subarray(0, 10), p.subarray(HDR_LEN, HDR_LEN + length));
+        if (crcWire !== crcCalc) {
+          this._stats.crcErrors++;         // 丢该帧，从该帧之后继续（不从帧内重扫）
+          this._consume(need, false);
+          continue;
+        }
+
+        const payload = new Uint8Array(length);
+        payload.set(p.subarray(HDR_LEN, HDR_LEN + length));
+        frames.push({ channel: p[3], flags: p[4] | (p[5] << 8), seq: p[8] | (p[9] << 8), length, payload });
+        this._stats.frames++;
+        this._consume(need, false);
+      }
+
+      if (pos >= src.length) break;
+      if (this._len === MAX_FRAME) this._consume(1, true); // 防御：缓冲满且无进展
+    }
+    return frames;
+  }
+}
+
+/* ============================ 消息重组器 ============================ */
+
+/** 与 C 侧 `wu_assembler_*` 等价的消息重组器（一通道一个）。 */
+class Assembler {
+  constructor(channel, cap = 64 * 1024) {
+    this.channel = channel;
+    this.cap = cap;
+    this._parts = [];
+    this._len = 0;
+    this.inMessage = false;
+    this.nextSeq = 0;
+    this.seqValid = false;
+    this.stats = { msgOk: 0, msgAborted: 0, resets: 0 };
+  }
+
+  reset() {
+    this._parts = [];
+    this._len = 0;
+    this.inMessage = false;
+    this.seqValid = false;
+  }
+
+  /**
+   * @param {{seq:number, flags:number, payload:Uint8Array}} frame
+   * @returns {Uint8Array|null} 拼装完成的消息，否则 null
+   */
+  push(frame) {
+    if (!frame) return null;
+    if (frame.flags & FLAGS.ABORT) {
+      this.stats.msgAborted++;
+      this.stats.resets++;
+      this.reset();
+      return null;
+    }
+    if (this.inMessage && (!this.seqValid || frame.seq !== this.nextSeq)) {
+      this.stats.msgAborted++;
+      this.stats.resets++;
+      this.reset();
+    }
+    if (!this.inMessage) { this._parts = []; this._len = 0; }
+
+    const payload = toBytes(frame.payload);
+    if (this._len + payload.length > this.cap) {
+      this.stats.msgAborted++;
+      this.stats.resets++;
+      this.reset();
+      return null;
+    }
+    if (payload.length) this._parts.push(payload);
+    this._len += payload.length;
+    this.nextSeq = (frame.seq + 1) & 0xFFFF;
+    this.seqValid = true;
+
+    if (frame.flags & FLAGS.MORE) { this.inMessage = true; return null; }
+
+    const msg = new Uint8Array(this._len);
+    let off = 0;
+    for (const part of this._parts) { msg.set(part, off); off += part.length; }
+    this.stats.msgOk++;
+    this.reset();
+    return msg;
+  }
+}
+
+/* ============================ CTRL / FILE 载荷构造 ============================ */
+
+/** CTRL 消息载荷（§5.1）：opcode / status / arg(u16) / body */
+function ctrlPayload(opcode, status = 0, arg = 0, body = null) {
+  const b = toBytes(body);
+  const out = new Uint8Array(CTRL_HDR_LEN + b.length);
+  out[0] = opcode & 0xFF;
+  out[1] = status & 0xFF;
+  wr16(out, 2, arg & 0xFFFF);
+  out.set(b, CTRL_HDR_LEN);
+  return out;
+}
+
+/** 解析 CTRL 载荷 → {opcode, status, arg, body} */
+function parseCtrl(payload) {
+  const p = toBytes(payload);
+  if (p.length < CTRL_HDR_LEN) return null;
+  return { opcode: p[0], status: p[1], arg: rd16(p, 2), body: p.subarray(CTRL_HDR_LEN) };
+}
+
+/** FILE 消息载荷（§5.3）：op / status / xid(u16) / offset(u32) / body */
+function filePayload(op, status = 0, xid = 0, offset = 0, body = null) {
+  const b = toBytes(body);
+  const out = new Uint8Array(FILE_HDR_LEN + b.length);
+  out[0] = op & 0xFF;
+  out[1] = status & 0xFF;
+  wr16(out, 2, xid & 0xFFFF);
+  wr32(out, 4, offset >>> 0);
+  out.set(b, FILE_HDR_LEN);
+  return out;
+}
+
+/** 解析 FILE 载荷 → {op, status, xid, offset, body} */
+function parseFile(payload) {
+  const p = toBytes(payload);
+  if (p.length < FILE_HDR_LEN) return null;
+  return { op: p[0], status: p[1], xid: rd16(p, 2), offset: rd32(p, 4), body: p.subarray(FILE_HDR_LEN) };
+}
+
+/** 解析 TELEM 载荷（§5.4，36 字节定长）。长度不足返回 null。 */
+function parseTelem(payload) {
+  const p = toBytes(payload);
+  if (p.length < TELEM_LEN) return null;
+  return {
+    uptimeMs: rd32(p, 0),
+    heapFree: rd32(p, 4),
+    psramFree: rd32(p, 8),
+    usbInBytes: rd32(p, 12),
+    usbOutBytes: rd32(p, 16),
+    videoKbps: rd32(p, 20),
+    videoDropped: rd32(p, 24),
+    videoFpsX100: rd32(p, 28),
+    wifiRssi: (p[32] << 24) >> 24,            // i8
+    flags: p[33],
+    wifiUp: !!(p[33] & 0x01),
+    sdMounted: !!(p[33] & 0x02),
+    videoActive: !!(p[33] & 0x04),
+    reserved: rd16(p, 34),
+  };
+}
+
+/* ============================ 可靠通道（发送侧） ============================ */
+
+/** seq 的环形序比较：a 在 b 之前（含相等）返回 true */
+function seqLE(a, b) { return ((b - a) & 0xFFFF) < 0x8000; }
+
+/**
+ * 可靠通道发送侧：滑动窗口 W=8 + 累计 ACK + 200 ms 超时重传 + 连续 5 次失败判死
+ * （协议 §6.1）。VIDEO/LOG/TELEM 不用本类。
+ */
+class ReliableChannel {
+  constructor(opts = {}) {
+    this.channel = (opts.channel === undefined) ? CHANNEL.CTRL : opts.channel;
+    this.send = opts.send || null;                 // (Uint8Array) => boolean，false = 端点忙
+    this.now = opts.now || (() => Date.now());
+    this.windowSize = opts.windowSize || WINDOW;
+    this.ackTimeoutMs = opts.ackTimeoutMs || ACK_TIMEOUT_MS;
+    this.maxRetx = (opts.maxRetx === undefined) ? MAX_RETX : opts.maxRetx;
+    this.onLinkDown = opts.onLinkDown || null;
+    this.onSend = opts.onSend || null;             // 诊断：每实际发出一个帧调用一次
+    this.outbox = [];                              // 无 send 回调时，发出去/被重传的帧落在这里（测试用）
+    this._resetState();
+    this._stats = { sent: 0, retransmits: 0, acked: 0, linkDown: 0, messages: 0 };
+  }
+
+  _resetState() {
+    this._nextSeq = 0;
+    this._inflight = [];      // [{seq, flags, payload, retries}]
+    this._lastProgressMs = this.now();
+    this._dead = false;
+  }
+
+  /** 复位 TX 序号 / 窗口 / 判死状态（协议 §6.3 —— 主机收到 HELLO 时调用） */
+  reset() { this._resetState(); }
+
+  get nextSeq() { return this._nextSeq; }
+  get unacked() { return this._inflight.length; }
+  get linkDown() { return this._dead; }
+  get space() { return this.windowSize - this._inflight.length; }
+  get stats() {
+    return {
+      channel: this.channel, nextSeq: this._nextSeq, unacked: this._inflight.length,
+      sent: this._stats.sent, retransmits: this._stats.retransmits, acked: this._stats.acked,
+      messages: this._stats.messages, linkDown: this._dead,
+    };
+  }
+
+  _transmit(seq, flags, payload) {
+    const bytes = encodeFrame({ channel: this.channel, flags, seq, payload });
+    let ok = true;
+    if (typeof this.send === 'function') ok = this.send(bytes) !== false;
+    this.outbox.push({ seq, flags, bytes });
+    if (this.outbox.length > 4096) this.outbox.splice(0, this.outbox.length - 4096);
+    this._stats.sent++;
+    if (this.onSend) this.onSend(bytes, { seq, flags });
+    return ok;
+  }
+
+  /**
+   * 发一条消息（自动分片；可靠通道每帧置 ACK 位）。
+   * @returns {number} 实际入窗并发出的帧数（窗口满时会少于总片数 → 调用方稍后重试剩余部分）
+   */
+  sendMessage(payload, opts = {}) {
+    if (this._dead) return 0;
+    const body = toBytes(payload);
+    const total = body.length === 0 ? 1 : Math.ceil(body.length / MAX_PAYLOAD);
+    const wantAck = opts.ack !== false;
+    let sent = 0;
+    for (let i = 0; i < total; i++) {
+      if (this._inflight.length >= this.windowSize) break;  // 窗口满：调用方等 ACK 后再续
+      const off = i * MAX_PAYLOAD;
+      const chunk = body.subarray(off, Math.min(off + MAX_PAYLOAD, body.length));
+      let flags = 0;
+      if (wantAck) flags |= FLAGS.ACK;
+      if (i + 1 < total) flags |= FLAGS.MORE;
+      const seq = this._nextSeq;
+      this._nextSeq = (this._nextSeq + 1) & 0xFFFF;
+      const slot = { seq, flags, payload: new Uint8Array(chunk), retries: 0 };
+      this._inflight.push(slot);
+      this._transmit(seq, flags, slot.payload);
+      sent++;
+    }
+    if (sent) { this._stats.messages++; this._lastProgressMs = this.now(); }
+    return sent;
+  }
+
+  /** 收到累计 ACK：`arg` = 对方下一个期望的 seq ⇒ 释放 seq < arg 的全部在途帧（§6.1） */
+  onAck(nextExpectedSeq) {
+    const ack = nextExpectedSeq & 0xFFFF;
+    const before = this._inflight.length;
+    this._inflight = this._inflight.filter((slot) => !seqLE(slot.seq, (ack - 1) & 0xFFFF));
+    const released = before - this._inflight.length;
+    if (released) {
+      this._stats.acked += released;
+      this._lastProgressMs = this.now();
+    }
+    return released;
+  }
+
+  /**
+   * 入站帧要求确认时回一个 ACK 帧（协议 §6.1 + §6.5①）。
+   *
+   * ⚠️ 两处**必须**按 §6.5 来（我第一版写错过，会破坏可靠通道）：
+   *  - §6.5②：ACK 帧吃**本通道自己的**下一个 seq，**不是**回显对方数据帧的 seq
+   *    （回显会让本方向自己的 seq 空间乱序 → 对方按 expected++ 收帧时把我们的 ACK 当重复/空洞丢掉，
+   *      于是数据永远无法被确认）。
+   *  - §6.5③：ACK 帧 `flags = 0`（不置 ACK 位），且**不入窗、不参与重传**，否则会形成 ACK 风暴。
+   */
+  ackReceivedFrame(frame, rxExpected) {
+    if (!frame || !(frame.flags & FLAGS.ACK)) return false;
+    // ⚠️ 2026-10-31 协议修订（§6.5②）：ACK 帧**不消耗**通道 seq。
+    // ACK 帧不进重传窗口（丢了不补发），旧实现让它吃掉一个 seq 后，一旦这条 ACK 丢失，
+    // 接收方的"期望 seq"就永久停住 → 之后所有数据帧被判 gap → 发送方重传 5 次 → link_down 循环。
+    // 现在 ACK 帧用 seq=0 发送，双方在 seq 门之前按"长度 4 且首字节 0x05"识别并消费。
+    const seq = 0;
+    this._transmit(seq, 0x0000, ctrlPayload(OP.ACK, 0, rxExpected & 0xFFFF, null));
+    this._stats.acksSent++;
+    return true;
+  }
+
+  /**
+   * 通道层消费一条完整消息：只认 `ACK` / `CREDIT`。
+   *
+   * §6.5①：ACK 与它确认的数据帧**同通道**。ACK 载荷是 CTRL 的 4 字节子头，而 FILE 消息最短 8 字节
+   * ⇒ 可靠通道上"长度恰为 4 且首字节 = ACK opcode"的消息只可能是 ACK，不存在与 FILE 语义的歧义。
+   *
+   * @returns {boolean} true = 已被通道层消费（调用方不要再当数据消息派发）
+   */
+  handleMessage(msg) {
+    const p = toBytes(msg);
+    if (p.length === CTRL_HDR_LEN && p[0] === OP.ACK) { this.onAck(rd16(p, 2)); return true; }
+    if (p.length === CTRL_HDR_LEN && p[0] === OP.CREDIT) return true; // 额度：暂不据此收敛窗口（报告"未实现项"）
+    return false;
+  }
+
+  /** 兼容别名（旧名字，等价于 handleMessage） */
+  consumeMessage(msg) { return this.handleMessage(msg); }
+
+  /** 定时器：200 ms 无进展 ⇒ 重传窗口内最老一帧（置 RETX）；连续 5 次失败 ⇒ 判死 */
+  tick(nowMs) {
+    if (this._dead || this._inflight.length === 0) return 0;
+    const t = (nowMs === undefined) ? this.now() : nowMs;
+    if (t - this._lastProgressMs < this.ackTimeoutMs) return 0;
+
+    const slot = this._inflight[0];
+    if (slot.retries >= this.maxRetx) {
+      this._inflight = [];
+      this._dead = true;
+      this._stats.linkDown++;
+      if (this.onLinkDown) this.onLinkDown(this);
+      return 0;
+    }
+    slot.retries++;
+    this._stats.retransmits++;
+    this._lastProgressMs = t;
+    this._transmit(slot.seq, slot.flags | FLAGS.RETX, slot.payload);
+    return 1;
+  }
+}
+
+/* ============================ 链路会话（HELLO / 重连 / ZLP） ============================ */
+
+/**
+ * 链路会话状态机（协议 §6.3 / §7）：
+ *   - 设备是序号主导方：收到 `HELLO` ⇒ 回 `HELLO_ACK` + 复位本侧所有 TX seq / RX 期望 / 拼接态；
+ *   - 连续 3 s 没收到任何**有效帧** ⇒ `link_down`（UI 显示"重连中"），清窗口与拼接态，
+ *     期间**不做任何可靠发送**；
+ *   - 0 字节 IN 读（ZLP）是合法事件：计入 `zeroLenReads` 并继续，不推进任何状态（§4.1）。
+ */
+class LinkSession {
+  constructor(opts = {}) {
+    this.send = opts.send || null;                    // (Uint8Array) => boolean：把帧写到设备（EP4 OUT）
+    this.now = opts.now || (() => Date.now());
+    this.linkDownMs = opts.linkDownMs || LINK_DOWN_MS;
+    this.decoder = opts.decoder || new FrameDecoder();
+    this._handlers = new Map();
+    this._assemblers = {};
+    this._asmBufs = {};
+    this._rxExpected = {};
+    for (let ch = 0; ch < CHANNEL_MAX; ch++) {
+      this._rxExpected[ch] = 0;
+      const a = new Assembler(ch);
+      this._assemblers[ch] = a;
+      this._asmBufs[ch] = new Uint8Array(MAX_FRAME * 4);
+    }
+    const mk = (channel) => new ReliableChannel({
+      channel, send: this.send, now: this.now,
+      onSend: () => {},
+      onLinkDown: (c) => this._onChannelDead(c),
+    });
+    this.ctrl = opts.ctrl || mk(CHANNEL.CTRL);
+    this.file = opts.file || mk(CHANNEL.FILE);
+    this._reliable = { 0: this.ctrl, 2: this.file };
+
+    this.state = 'waiting_hello';       // 'waiting_hello' | 'up' | 'link_down'
+    this.lastRxMs = this.now();
+    this.caps = 0;
+    this.deviceVersion = null;
+    this.zeroLenReads = 0;              // §4.1：ZLP 计数
+    this._stats = { frames: 0, helloSent: 0, helloAckSent: 0, helloLost: 0,
+                    linkDowns: 0, linkUps: 0, rxMessages: 0, txMessages: 0, crcErrors: 0, resyncBytes: 0,
+                    acksSent: 0, pingsSent: 0, pongsSent: 0 };
+  }
+
+  /* ---- 事件（极简 emitter，不依赖 DOM） ---- */
+  on(name, cb) {
+    if (!this._handlers.has(name)) this._handlers.set(name, []);
+    this._handlers.get(name).push(cb);
+    return this;
+  }
+  emit(name, data) {
+    const list = this._handlers.get(name);
+    if (!list) return;
+    for (const cb of list) {
+      try { cb(data); } catch (e) { /* 回调异常不得打断解析 */ }
+    }
+  }
+
+  get linkUp() { return this.state === 'up'; }
+  get stats() {
+    return {
+      state: this.state,
+      linkUp: this.state === 'up',
+      zeroLenReads: this.zeroLenReads,
+      crcErrors: this.decoder.stats.crcErrors,
+      resyncBytes: this.decoder.stats.resyncBytes,
+      frames: this.decoder.stats.frames,
+      badHeader: this.decoder.diagnostics.badHeader,
+      lastRxMs: this.lastRxMs,
+      ctrlUnacked: this.ctrl.unacked,
+      fileUnacked: this.file.unacked,
+      ...this._stats,
+    };
+  }
+
+  _sendBytes(bytes) {
+    if (typeof this.send === 'function') {
+      try { return this.send(bytes) !== false; } catch (e) { return false; }
+    }
+    return true;
+  }
+
+  /* ---- 收到原始 IN 字节 ---- */
+  onBytes(bytes) {
+    const frames = this.decoder.push(bytes);
+    for (const f of frames) this._onFrame(f);
+    return frames;
+  }
+
+  /** 0 字节 IN 读 = 合法 ZLP（§4.1）：只计数，不推进任何状态 */
+  onZeroLenRead() {
+    this.zeroLenReads++;
+    return this.zeroLenReads;
+  }
+
+  _onFrame(frame) {
+    this._stats.frames++;
+    this.lastRxMs = this.now();
+    if (this.state !== 'up') {
+      this.state = 'up';
+      this._stats.linkUps++;
+      this.emit('link', { state: 'up' });
+    }
+
+    const ch = frame.channel;
+    if (ch >= CHANNEL_MAX) return;
+
+    // §6.3 + §6.5④：`HELLO` 是**序号主导方**的引导帧，必须**绕开 seq 门**处理。
+    // 引导期主机会发 stateless PING（seq=0/flags=0，§6.5④），它会占掉"下一个期望 seq"，
+    // 而设备的周期性 HELLO 也可能是同一个 seq —— 若让 HELLO 走普通去重逻辑，
+    // 它会被当成"重复 seq"丢掉，链路永远收敛不了。故 HELLO 单帧在此直接放行。
+    const bootstrap = (ch === CHANNEL.CTRL && frame.payload && frame.payload[0] === OP.HELLO);
+
+    const reliable = !!(CHANNEL_INFO[ch] && CHANNEL_INFO[ch].reliable);
+    // ACK 帧不参与 seq 期望值（2026-10-31 修订，见 ackReceivedFrame 说明）
+    if (reliable && frame.length === CTRL_HDR_LEN && frame.payload && frame.payload[0] === OP.ACK) {
+      const rcAck = this._reliable[ch];
+      if (rcAck) rcAck.onAck(rd16(frame.payload, 2));
+      return;
+    }
+    if (reliable && !bootstrap) {
+      const rc = this._reliable[ch];
+      const expect = this._rxExpected[ch];
+      const isDup = (frame.seq !== expect) && seqLE(frame.seq, (expect - 1) & 0xFFFF);
+      if (isDup) {
+        // §6.1：重复 seq 必须幂等 —— 再回一次 ACK，**不**重复投递
+        if (rc) rc.ackReceivedFrame(frame, expect);
+        return;
+      }
+      if (frame.seq !== expect) {
+        // 乱序（有空洞）：累计 ACK 停在上一个期望值，不投递；发送方 200 ms 后会重传最老帧
+        if (rc) rc.ackReceivedFrame(frame, expect);
+        this.emit('gap', { channel: ch, got: frame.seq, expected: expect });
+        return;
+      }
+      this._rxExpected[ch] = (expect + 1) & 0xFFFF;
+      if (rc) rc.ackReceivedFrame(frame, this._rxExpected[ch]);
+    }
+
+    const asm = this._assemblers[ch];
+    const msg = asm.push(frame);
+    if (msg === null) return;
+    this._stats.rxMessages++;
+
+    // §6.5①：ACK/CREDIT 由通道层消费，不再当数据消息派发
+    if (reliable && this._reliable[ch] && this._reliable[ch].handleMessage(msg)) return;
+
+    if (ch === CHANNEL.CTRL) this._onCtrlMessage(msg, frame);
+    else this.emit('message', { channel: ch, payload: msg, frame });
+  }
+
+  _onCtrlMessage(msg, frame) {
+    const c = parseCtrl(msg);
+    if (!c) return;
+    this.emit('ctrl', c);
+
+    switch (c.opcode) {
+      case OP.HELLO: {
+        // 设备是序号主导方：收到 HELLO ⇒ 复位本侧序号与拼接态，再回 HELLO_ACK（§6.3）
+        this.deviceVersion = c.arg;
+        this.caps = (c.body && c.body.length >= 4) ? rd32(c.body, 0) : 0;
+        this.resetSequences();
+        this.sendHelloAck();
+        this.state = 'up';
+        this.emit('hello', { version: c.arg, caps: this.caps });
+        break;
+      }
+      case OP.HELLO_ACK:
+        this.state = 'up';
+        this.emit('helloAck', c);
+        break;
+      case OP.PING:
+        this.sendPong();
+        this.emit('ping', c);
+        break;
+      case OP.PONG:
+        this.emit('pong', c);
+        break;
+      case OP.ACK:
+        this.ctrl.onAck(c.arg);
+        this.emit('ack', c);
+        break;
+      case OP.CREDIT:
+        this.emit('credit', c);
+        break;
+      case OP.TELEM:
+        break;
+      default:
+        this.emit('ctrlMessage', { ctrl: c, frame });
+        break;
+    }
+    // 注：ACK / CREDIT 已在 `_onFrame()` 里由通道层（§6.5①）消费，这里**不再**重复消费
+  }
+
+  /* ---- 发送 API（state 不为 up 时不做可靠发送，§6.3） ---- */
+
+  /** 复位本侧所有 TX seq / RX 期望 / 拼接态（收 HELLO 时调用） */
+  resetSequences() {
+    for (let ch = 0; ch < CHANNEL_MAX; ch++) {
+      this._rxExpected[ch] = 0;
+      this._assemblers[ch].reset();
+    }
+    this.ctrl.reset();
+    this.file.reset();
+  }
+
+  /**
+   * 回 `HELLO_ACK`（**引导帧，无状态**：`seq = 0`、`flags = 0`、不入可靠窗口）。
+   *
+   * 依据 §6.5④ 的同一理由（引导期的帧若占窗口，会在设备周期性 HELLO 触发的序号重置
+   * 变成悬空未确认帧）：`HELLO` 每 2 s 重发一次，所以本握手天然幂等 ——
+   * 丢了就等下一个 HELLO 再回，不需要重传，也不该占用 seq 空间。
+   * ⚠️ 因此设备侧必须**绕开 seq 门**识别 `HELLO_ACK`（`webusb_proto.c` 里同款处理）。
+   */
+  sendHelloAck() {
+    const ok = this.sendRaw(CHANNEL.CTRL, ctrlPayload(OP.HELLO_ACK, 0, PROTO_VERSION, null), 0, 0);
+    if (ok) this._stats.helloAckSent++;
+    return ok;
+  }
+
+  /**
+   * 心跳 PING：`link_up` 之后是**普通可靠帧**（占 seq、入窗口、可重传）；
+   * 引导期（`HELLO` 与 `HELLO_ACK` 之间）按 §6.5④ 走无状态 `seq = 0` / `flags = 0`。
+   */
+  sendPing() {
+    const ok = (this.state === 'up')
+      ? this.sendCtrl(OP.PING, { force: true })
+      : this.sendRaw(CHANNEL.CTRL, ctrlPayload(OP.PING, 0, 0, null), 0, 0);
+    if (ok) this._stats.pingsSent++;
+    return ok;
+  }
+
+  sendPong() {
+    const ok = this.sendCtrl(OP.PONG, { force: true });
+    if (ok) this._stats.pongsSent++;
+    return ok;
+  }
+
+  /**
+   * 发一条 CTRL 消息（可靠）。link_down 期间默认拒绝（`force` 可绕过，仅用于 HELLO_ACK/PING）。
+   * @returns {boolean} 是否已入窗发出
+   */
+  sendCtrl(opcode, opts = {}) {
+    if (this.state !== 'up' && !opts.force) return false;
+    const payload = ctrlPayload(opcode, opts.status || 0, opts.arg || 0, opts.body || null);
+    const n = this.ctrl.sendMessage(payload, { ack: opts.ack !== false });
+    if (n) this._stats.txMessages++;
+    return n > 0;
+  }
+
+  /** 发一条 FILE 消息（可靠，§5.3 的 8 字节头 + xid 配对） */
+  sendFile(op, opts = {}) {
+    if (this.state !== 'up' && !opts.force) return false;
+    const payload = filePayload(op, opts.status || 0, opts.xid || 0, opts.offset || 0, opts.body || null);
+    const n = this.file.sendMessage(payload, { ack: true });
+    if (n) this._stats.txMessages++;
+    return n > 0;
+  }
+
+  /** 不可靠通道的单帧发送（LOG 回显等；设备→主机为主，主机侧仅诊断用） */
+  sendRaw(channel, payload, seq = 0, flags = 0) {
+    return this._sendBytes(encodeFrame({ channel, flags, seq, payload }));
+  }
+
+  /** 定时器：3 s 无有效帧 ⇒ link_down；同时驱动两个可靠通道的重传 */
+  tick(nowMs) {
+    const t = (nowMs === undefined) ? this.now() : nowMs;
+    let retx = 0;
+    if (this.state === 'up' && this.linkDownMs > 0 && (t - this.lastRxMs) >= this.linkDownMs) {
+      this.state = 'link_down';
+      this._stats.linkDowns++;
+      this.resetSequences();
+      this.emit('link', { state: 'link_down' });
+    }
+    // 重连提示：每 2 s 使一次 HELLO 期望（主机侧只提示，不主动发 HELLO —— 设备才是主导方）
+    if (this.state !== 'up' && (t - this.lastRxMs) > 0 && this.linkDownMs > 0) {
+      const cycles = Math.floor((t - this.lastRxMs) / HELLO_PERIOD_MS);
+      if (cycles > this._stats.helloLost) this._stats.helloLost = cycles;
+    }
+    if (this.state === 'up') {
+      retx += this.ctrl.tick(t);
+      retx += this.file.tick(t);
+    }
+    return retx;
+  }
+
+  _onChannelDead() {
+    this.state = 'link_down';
+    this._stats.linkDowns++;
+    this.resetSequences();
+    this.emit('link', { state: 'link_down', reason: 'retx_exhausted' });
+  }
+}
+
+/* ============================ 默认导出（便于 `import WU from './proto.js'`） ============================ */
+
+const WU = {
+  MAGIC, MAGIC0, MAGIC1, VERSION, HDR_LEN, MAX_PAYLOAD, MAX_FRAME,
+  CHANNEL, CHANNEL_NAMES, CHANNEL_MAX, CHANNEL_INFO,
+  FLAGS, OP, OP_NAMES, STATUS, STATUS_NAMES, CAP, FILE_OP, FILE_OP_NAMES,
+  PROTO_VERSION, CTRL_HDR_LEN, FILE_HDR_LEN, VIDEO_HDR_LEN, TELEM_LEN,
+  WINDOW, ACK_TIMEOUT_MS, MAX_RETX, LINK_DOWN_MS, HELLO_PERIOD_MS, PING_PERIOD_MS, TELEM_PERIOD_MS,
+  toBytes, hexToBytes, bytesToHex, utf8ToBytes, bytesToUtf8, rd16, rd32, wr16, wr32,
+  crc16, crc16OfFrame, encodeFrame, fragmentMessage,
+  FrameDecoder, Assembler, ReliableChannel, LinkSession,
+  ctrlPayload, parseCtrl, filePayload, parseFile, parseTelem,
+};
+// [内联镜像] export default WU;  ← 经典脚本里无默认导出，忽略
+</script>
+<!-- @source web/file.js | sha256=7c90334fff3934adb4546f064b4377bc518acf8bc6107174f869d0c2cfac7154 | generated by tools/build_web.py -->
+<script id="wu-file-inline">
+'use strict';
+// [内联镜像 of web/file.js] 由 tools/build_web.py 生成，请勿手改
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 浏览器内文件管理器（FILE 通道，协议 §5.3）
+//
+// 归 I0（**冻结，不得改**）：payload 前 8 字节头 `{u8 op, u8 status, u16 xid, u32 offset}`
+//   + **`xid` 请求/响应配对规则**。本文件只定义 8 字节头**之后**的 body 语义与客户端 API。
+//
+// ⚠️ body 语义（本文件定义，**尚未与设备侧对齐**）：
+//   设备侧 `components/usb_vendor/file_service.c` 目前**不存在**（我 grep 过整个 components/）。
+//   docs/protocol.md §5.3 明确"详细文件操作语义由 WS-webusb 在 web/file.js +
+//   components/usb_vendor/file_service.c 里定"——所以下面这张表就是 JS 侧的提案，
+//   **写设备侧的同事/Lead 必须照它实现，或先报 Lead 改本文件**（两边不一致 = FILE 通道不可用）。
+//
+//   | op | 名字 | 方向 | 8 字节头里的字段 | body |
+//   |---|---|---|---|---|
+//   | 0  | LIST_REQ | H→D | xid | `char path[] \0`（UTF-8） |
+//   | 1  | LIST_RSP | D→H | xid | `N × { u32 size, u8 is_dir, char name[256] }`（每条 261 B，可跨帧分片） |
+//   | 2  | OPEN_REQ | H→D | xid | `u8 mode`（0=只读 1=写/创建/截断） + `char path[] \0` |
+//   | 3  | OPEN_RSP | D→H | xid | `u32 handle, u32 size, u8 is_dir, u8 rsv[3]`（12 B） |
+//   | 4  | READ_REQ | H→D | xid, **offset** | `u32 handle, u32 length`（8 B；length ≤ 1016） |
+//   | 5  | READ_RSP | D→H | xid, **offset** | 文件数据（长度 = 实际读到；status=OK 且 0 字节 ⇒ EOF） |
+//   | 6  | WRITE_REQ | H→D | xid, **offset** | `u32 handle` + 数据（数据 ≤ 1012 B） |
+//   | 7  | WRITE_RSP | D→H | xid | `u32 written`（4 B） |
+//   | 8  | CLOSE_REQ | H→D | xid | `u32 handle`（4 B） |
+//   | 9  | CLOSE_RSP | D→H | xid | 空 |
+//   | 10 | DELETE | H→D | xid | `char path[] \0` |
+//   | 11 | MKDIR | H→D | xid | `char path[] \0` |
+//   | 12 | RENAME | H→D | xid | `char src[] \0 char dst[] \0` |
+//
+//   ⚠️ 10/11/12 **没有独立的 `_RSP` opcode**（§5.3 的 opcode 表就是这么定的）：
+//      约定 = 设备**原样回同一个 op**（status 填 §5.1 错误码、xid 原样回），客户端按 xid 配对待之。
+//
+// 可靠性与流控：本模块**不做**重传/窗口（那是 proto.js 的 `ReliableChannel` 的事）——
+//   它只走 `LinkSession.sendFile()`，并把收到的 FILE 消息按 `xid` 配对给发起方。
+//   客户端自身负责：每个请求一个超时（默认 2 s，超时即拒绝，不静默吞掉）、xid 回绕、
+//   迟到响应丢弃计数、以及"窗口满/链路未 up 时退避重试"。
+
+
+/* ==========================================================================
+ * 常量
+ * ======================================================================== */
+
+/** LIST_RSP / OPEN_RSP 里名字字段的固定宽度（协议 §5.3：`char name[256]`） */
+const FILE_NAME_LEN = 256;
+/** LIST_RSP 单条目录项的字节数 */
+const FILE_ENTRY_LEN = 4 + 1 + FILE_NAME_LEN; // 261
+/** WRITE_REQ 单帧可携带的数据字节数：8(头) + 4(handle) + N ≤ 1024 */
+const MAX_WRITE_DATA = MAX_PAYLOAD - FILE_HDR_LEN - 4; // 1012
+/** READ_REQ 单次可请求的字节数（READ_RSP 的 body 直接是数据：8 + N ≤ 1024） */
+const MAX_READ_DATA = MAX_PAYLOAD - FILE_HDR_LEN; // 1016
+/** OPEN_REQ 的 mode */
+const OPEN_MODE = { READ: 0, WRITE: 1 };
+/** xid 请求默认超时 */
+const DEFAULT_XID_TIMEOUT_MS = 2000;
+/** 可靠窗口满时的退避重试上限 */
+const DEFAULT_SEND_RETRY_MS = 2000;
+
+/** 状态码名字（§5.1） */
+const STATUS_NAME = {
+  0x00: 'OK', 0x01: 'EINVAL', 0x02: 'ENOENT', 0x03: 'EIO',
+  0x04: 'ENOSPC', 0x05: 'EBUSY', 0x06: 'ENOTSUP', 0x7F: 'EUNKNOWN',
+};
+
+/** FILE 通道错误（带 `name` / `status`，便于 UI 分类显示） */
+class FileError extends Error {
+  constructor(name, message, status) {
+    super(message);
+    this.name = name;
+    this.status = (status === undefined) ? null : status;
+    this.statusName = (status === undefined) ? null : (STATUS_NAME[status] || ('0x' + status.toString(16)));
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function pathBytes(path) {
+  const b = utf8ToBytes(String(path === undefined ? '/' : path));
+  if (b.indexOf(0) >= 0) throw new FileError('EINVAL', '路径里不允许出现 NUL');
+  const out = new Uint8Array(b.length + 1); // 末尾补 NUL
+  out.set(b, 0);
+  return out;
+}
+
+/** 从 NUL 结尾的字节串里读出一个字符串（没有 NUL 时读到末尾） */
+function cstr(bytes, off) {
+  const b = toBytes(bytes);
+  let end = off;
+  while (end < b.length && b[end] !== 0) end++;
+  return bytesToUtf8(b.subarray(off, end));
+}
+
+function concatBytes(list) {
+  let n = 0;
+  for (const x of list) n += x.length;
+  const out = new Uint8Array(n);
+  let off = 0;
+  for (const x of list) { out.set(x, off); off += x.length; }
+  return out;
+}
+
+/* ==========================================================================
+ * 纯编解码（可离线单测；与设备侧必须逐字节一致）
+ * ======================================================================== */
+
+/** 编码一条 FILE 消息的 payload（8 字节头 + body）。等价于 proto.js 的 `filePayload`，此处只做语义包装。 */
+function encodeFileMessage(op, { status = 0, xid = 0, offset = 0, body = null } = {}) {
+  return filePayload(op, status, xid, offset, body);
+}
+
+/**
+ * 解析一条 FILE 消息的 payload → `{op, opName, status, statusName, xid, offset, body, malformed}`
+ * 永不抛异常（长度不足返回 `{malformed:true}`），因为它是接收入口。
+ */
+function decodeFileMessage(payload) {
+  const p = toBytes(payload);
+  if (p.length < FILE_HDR_LEN) {
+    return { malformed: true, length: p.length, op: null, opName: null, status: null, xid: null, offset: null, body: new Uint8Array(0) };
+  }
+  const m = parseFile(p);
+  return {
+    malformed: false,
+    op: m.op,
+    opName: FILE_OP_NAMES[m.op] || ('OP' + m.op),
+    status: m.status,
+    statusName: STATUS_NAME[m.status] || ('0x' + m.status.toString(16)),
+    xid: m.xid,
+    offset: m.offset,
+    body: m.body,
+  };
+}
+
+/** LIST_RSP：把目录项数组编码成 body（每项 261 B）。 */
+function encodeListEntries(entries) {
+  const list = entries || [];
+  const out = new Uint8Array(list.length * FILE_ENTRY_LEN);
+  list.forEach((e, i) => {
+    const off = i * FILE_ENTRY_LEN;
+    wr32(out, off, (e.size || 0) >>> 0);
+    out[off + 4] = e.isDir ? 1 : 0;
+    const name = utf8ToBytes(String(e.name === undefined ? '' : e.name));
+    const n = Math.min(name.length, FILE_NAME_LEN - 1); // 必须留一个 NUL
+    out.set(name.subarray(0, n), off + 5);
+    out[off + 5 + n] = 0;
+  });
+  return out;
+}
+
+/**
+ * LIST_RSP：解析 body。
+ * 尾部不足一条（261 B）的残片**丢弃并计数**，绝不越界读。
+ * @returns {{entries:Array, truncatedTail:number}}
+ */
+function decodeListEntries(body) {
+  const b = toBytes(body);
+  const full = Math.floor(b.length / FILE_ENTRY_LEN);
+  const entries = [];
+  for (let i = 0; i < full; i++) {
+    const off = i * FILE_ENTRY_LEN;
+    entries.push({
+      size: rd32(b, off),
+      isDir: b[off + 4] !== 0,
+      name: cstr(b, off + 5),
+    });
+  }
+  return { entries, truncatedTail: b.length - full * FILE_ENTRY_LEN };
+}
+
+/** OPEN_RSP：`u32 handle, u32 size, u8 is_dir, u8 rsv[3]` */
+function encodeOpenRsp({ handle = 0, size = 0, isDir = false } = {}) {
+  const out = new Uint8Array(12);
+  wr32(out, 0, handle >>> 0);
+  wr32(out, 4, size >>> 0);
+  out[8] = isDir ? 1 : 0;
+  return out;
+}
+
+function decodeOpenRsp(body) {
+  const b = toBytes(body);
+  if (b.length < 9) throw new FileError('EIO', 'OPEN_RSP body 长度 ' + b.length + ' < 9（需要 handle/size/is_dir）');
+  return { handle: rd32(b, 0), size: rd32(b, 4), isDir: b[8] !== 0 };
+}
+
+/** READ_REQ body：`u32 handle, u32 length` */
+function encodeReadReq({ handle = 0, length = 0 } = {}) {
+  const out = new Uint8Array(8);
+  wr32(out, 0, handle >>> 0);
+  wr32(out, 4, length >>> 0);
+  return out;
+}
+
+function decodeReadReq(body) {
+  const b = toBytes(body);
+  if (b.length < 8) throw new FileError('EINVAL', 'READ_REQ body 长度 ' + b.length + ' < 8');
+  return { handle: rd32(b, 0), length: rd32(b, 4) };
+}
+
+/** WRITE_REQ body：`u32 handle` + 数据 */
+function encodeWriteReq({ handle = 0 } = {}, data) {
+  const d = toBytes(data);
+  if (d.length > MAX_WRITE_DATA) {
+    throw new FileError('EINVAL', 'WRITE 数据 ' + d.length + ' B 超过单帧上限 ' + MAX_WRITE_DATA);
+  }
+  const out = new Uint8Array(4 + d.length);
+  wr32(out, 0, handle >>> 0);
+  out.set(d, 4);
+  return out;
+}
+
+function decodeWriteReq(body) {
+  const b = toBytes(body);
+  if (b.length < 4) throw new FileError('EINVAL', 'WRITE_REQ body 长度 ' + b.length + ' < 4');
+  return { handle: rd32(b, 0), data: b.subarray(4) };
+}
+
+/** WRITE_RSP body：`u32 written` */
+function encodeWriteRsp({ written = 0 } = {}) {
+  const out = new Uint8Array(4);
+  wr32(out, 0, written >>> 0);
+  return out;
+}
+
+function decodeWriteRsp(body) {
+  const b = toBytes(body);
+  if (b.length < 4) return { written: 0, malformed: true };
+  return { written: rd32(b, 0), malformed: false };
+}
+
+/** 各种"带处理句柄"的请求：`u32 handle` */
+function encodeHandle(handle) {
+  const out = new Uint8Array(4);
+  wr32(out, 0, handle >>> 0);
+  return out;
+}
+
+/** RENAME body：`src \0 dst \0` */
+function encodeRenameBody(from, to) {
+  return concatBytes([pathBytes(from), pathBytes(to)]);
+}
+
+/* ==========================================================================
+ * FileClient —— 走 FILE 通道的请求/响应客户端（xid 配对）
+ * ======================================================================== */
+
+/**
+ * @example
+ *   const fc = new FileClient({ session });                       // session = proto.js LinkSession
+ *   session.on('message', ({channel, payload}) => {
+ *     if (channel === CHANNEL.FILE) fc.onMessage(payload);
+ *   });
+ *   const {entries} = await fc.list('/');
+ */
+class FileClient {
+  /**
+   * @param {{session:object, now?:function():number, xidStart?:number, timeoutMs?:number,
+   *          maxInFlight?:number, onEvent?:function(string,object)}} opts
+   */
+  constructor(opts = {}) {
+    this.session = opts.session || null;
+    this.now = opts.now || (() => Date.now());
+    this.timeoutMs = (opts.timeoutMs === undefined) ? DEFAULT_XID_TIMEOUT_MS : opts.timeoutMs;
+    this.maxInFlight = (opts.maxInFlight === undefined) ? 4 : opts.maxInFlight;
+    this.onEvent = opts.onEvent || null;
+    this._xid = (opts.xidStart === undefined) ? 1 : (opts.xidStart & 0xFFFF);
+    this._pending = new Map();       // xid -> {resolve, reject, op, at, timer, retry}
+    this.stats = {
+      requests: 0, responses: 0, timeouts: 0, unmatchedResponses: 0,
+      malformed: 0, sendBlocked: 0, retries: 0, bytesWritten: 0, bytesRead: 0,
+    };
+  }
+
+  _emit(type, info) {
+    if (this.onEvent) {
+      try { this.onEvent(type, info || {}); } catch (e) { /* 上层回调不得影响协议 */ }
+    }
+  }
+
+  get pending() { return this._pending.size; }
+
+  _nextXid() {
+    // xid 0 保留给"无事务"的帧（§5.3：请求/响应配对），真实事务从 1 开始
+    for (let i = 0; i < 0xFFFF; i++) {
+      const x = this._xid;
+      this._xid = (this._xid + 1) & 0xFFFF;
+      if (this._xid === 0) this._xid = 1;
+      if (!this._pending.has(x)) return x;
+    }
+    throw new FileError('EBUSY', 'xid 空间耗尽（有 ' + this._pending.size + ' 个请求未完成）');
+  }
+
+  /**
+   * 发一个请求并等它的响应（按 xid 配对）。
+   * @returns {Promise<object>} 解析后的 FILE 消息（status 非 0 时**不抛**，由调用方判断）
+   */
+  async request(op, { status = 0, offset = 0, body = null, timeoutMs = this.timeoutMs } = {}) {
+    if (!this.session || typeof this.session.sendFile !== 'function') {
+      throw new FileError('ENOTSUP', 'FileClient 未绑定 LinkSession（session.sendFile 缺失）');
+    }
+    const xid = this._nextXid();
+    const p = new Promise((resolve, reject) => {
+      const entry = { resolve, reject, op, at: this.now(), timer: null };
+      entry.timer = setTimeout(() => {
+        this._pending.delete(xid);
+        this.stats.timeouts++;
+        this._emit('timeout', { xid, op, opName: FILE_OP_NAMES[op] });
+        reject(new FileError('ETIMEDOUT',
+          FILE_OP_NAMES[op] + ' xid=' + xid + ' 超过 ' + timeoutMs + ' ms 无响应' +
+          '（可靠通道仍在 200 ms 重传；若一直没有响应，检查设备侧 FILE 服务是否实现）'));
+      }, timeoutMs);
+      this._pending.set(xid, entry);
+    });
+
+    // 窗口满 / 链路未 up：退避重试（绝不静默丢请求）
+    const t0 = this.now();
+    for (;;) {
+      let sent = false;
+      try {
+        sent = this.session.sendFile(op, { status, xid, offset, body }) === true;
+      } catch (e) {
+        sent = false;
+      }
+      if (sent) {
+        this.stats.requests++;
+        this._emit('request', { xid, op, opName: FILE_OP_NAMES[op], offset, bodyLength: body ? toBytes(body).length : 0 });
+        return p;
+      }
+      this.stats.sendBlocked++;
+      if (this.now() - t0 >= DEFAULT_SEND_RETRY_MS) {
+        const entry = this._pending.get(xid);
+        if (entry) { clearTimeout(entry.timer); this._pending.delete(xid); }
+        throw new FileError('EBUSY',
+          FILE_OP_NAMES[op] + ' 无法发出：链路未 up 或可靠窗口已满（等了 ' + DEFAULT_SEND_RETRY_MS + ' ms）');
+      }
+      this._emit('send_blocked', { xid, op });
+      this.stats.retries++;
+      await sleep(25);
+    }
+  }
+
+  /** 收到一条 FILE 通道消息（由宿主从 LinkSession 的 'message' 事件转交）。 */
+  onMessage(payload) {
+    const msg = decodeFileMessage(payload);
+    if (msg.malformed) {
+      this.stats.malformed++;
+      this._emit('malformed', { length: msg.length });
+      return null;
+    }
+    const entry = this._pending.get(msg.xid);
+    if (!entry) {
+      // 迟到响应 / 设备主动推送 / xid 不匹配：只计数，绝不错配给别的请求
+      this.stats.unmatchedResponses++;
+      this._emit('unmatched', { xid: msg.xid, op: msg.op, opName: msg.opName });
+      return msg;
+    }
+    clearTimeout(entry.timer);
+    this._pending.delete(msg.xid);
+    this.stats.responses++;
+    this._emit('response', { xid: msg.xid, op: msg.op, opName: msg.opName, status: msg.status, offset: msg.offset, bodyLength: msg.body.length });
+    entry.resolve(msg);
+    return msg;
+  }
+
+  /** 取消所有未完成请求（断开/重连时必须调用，避免旧会话的 Promise 泄漏到新会话） */
+  abortAll(reason) {
+    for (const [xid, e] of this._pending) {
+      clearTimeout(e.timer);
+      e.reject(new FileError('EABORT', '请求被取消（' + (reason || 'abort') + '） xid=' + xid));
+    }
+    this._pending.clear();
+  }
+
+  /** 复位 xid 与统计（收到 HELLO、链路重连后调用：xid 空间是每会话的） */
+  reset(reason) {
+    this.abortAll(reason || 'reset');
+    this._xid = 1;
+    this._emit('reset', { reason: reason || 'reset' });
+  }
+
+  _check(msg, expectOps) {
+    if (msg.status !== STATUS.OK) {
+      throw new FileError('ESTATUS',
+        (msg.opName || 'OP' + msg.op) + ' 返回 ' + msg.statusName + ' (0x' + msg.status.toString(16) + ')',
+        msg.status);
+    }
+    if (expectOps && expectOps.indexOf(msg.op) < 0) {
+      throw new FileError('EPROTO',
+        '响应 op=' + msg.op + '（' + msg.opName + '）不是期望的 ' +
+        expectOps.map((o) => FILE_OP_NAMES[o]).join('/'));
+    }
+    return msg;
+  }
+
+  /* ---------------- 面向 UI 的高层 API（status 非 0 一律抛 FileError） ---------------- */
+
+  /** 列目录 → `{entries:[{name,size,isDir}], truncatedTail}` */
+  async list(path = '/') {
+    const msg = await this.request(FILE_OP.LIST_REQ, { body: pathBytes(path) });
+    this._check(msg, [FILE_OP.LIST_RSP]);
+    const r = decodeListEntries(msg.body);
+    if (r.truncatedTail) this._emit('list_truncated', { tail: r.truncatedTail });
+    return r;
+  }
+
+  /** 打开文件 → `{handle, size, isDir}` */
+  async open(path, mode = OPEN_MODE.READ) {
+    const body = concatBytes([Uint8Array.of(mode & 0xFF), pathBytes(path)]);
+    const msg = await this.request(FILE_OP.OPEN_REQ, { body });
+    this._check(msg, [FILE_OP.OPEN_RSP]);
+    return decodeOpenRsp(msg.body);
+  }
+
+  /** 读一段（offset 在 8 字节头里，handle/length 在 body 里） */
+  async read(handle, offset, length = MAX_READ_DATA) {
+    const n = Math.min(length, MAX_READ_DATA);
+    const msg = await this.request(FILE_OP.READ_REQ, { offset: offset >>> 0, body: encodeReadReq({ handle, length: n }) });
+    this._check(msg, [FILE_OP.READ_RSP]);
+    this.stats.bytesRead += msg.body.length;
+    return msg.body;
+  }
+
+  /** 写一段（≤ 1012 B） */
+  async write(handle, offset, data) {
+    const d = toBytes(data);
+    if (d.length > MAX_WRITE_DATA) throw new FileError('EINVAL', 'write 单次数据超过 ' + MAX_WRITE_DATA + ' B');
+    const msg = await this.request(FILE_OP.WRITE_REQ, { offset: offset >>> 0, body: encodeWriteReq({ handle }, d) });
+    this._check(msg, [FILE_OP.WRITE_RSP]);
+    const r = decodeWriteRsp(msg.body);
+    this.stats.bytesWritten += r.written;
+    return r.written;
+  }
+
+  async close(handle) {
+    const msg = await this.request(FILE_OP.CLOSE_REQ, { body: encodeHandle(handle) });
+    this._check(msg, [FILE_OP.CLOSE_RSP]);
+    return true;
+  }
+
+  /** 删除（设备原样回 op=10，按 xid 配对） */
+  async remove(path) {
+    const msg = await this.request(FILE_OP.DELETE, { body: pathBytes(path) });
+    return this._check(msg, [FILE_OP.DELETE, 0x80 | FILE_OP.DELETE]);
+  }
+
+  async mkdir(path) {
+    const msg = await this.request(FILE_OP.MKDIR, { body: pathBytes(path) });
+    return this._check(msg, [FILE_OP.MKDIR, 0x80 | FILE_OP.MKDIR]);
+  }
+
+  async rename(from, to) {
+    const msg = await this.request(FILE_OP.RENAME, { body: encodeRenameBody(from, to) });
+    return this._check(msg, [FILE_OP.RENAME, 0x80 | FILE_OP.RENAME]);
+  }
+
+  /**
+   * 整文件下载：OPEN → 反复 READ（offset 递增，EOF = OK 且 0 字节）→ CLOSE。
+   * @param {{onProgress?:function({loaded,total}), chunkSize?:number}} [opts]
+   * @returns {Promise<{name:string, bytes:Uint8Array, size:number}>}
+   */
+  async readFile(path, opts = {}) {
+    const chunkSize = Math.min(opts.chunkSize || MAX_READ_DATA, MAX_READ_DATA);
+    const info = await this.open(path, OPEN_MODE.READ);
+    if (info.isDir) {
+      await this.close(info.handle).catch(() => {});
+      throw new FileError('EINVAL', path + ' 是目录，不能按文件下载');
+    }
+    const parts = [];
+    let loaded = 0;
+    try {
+      for (;;) {
+        const chunk = await this.read(info.handle, loaded, chunkSize);
+        if (chunk.length === 0) break;
+        parts.push(chunk);
+        loaded += chunk.length;
+        if (opts.onProgress) opts.onProgress({ loaded, total: info.size });
+        if (info.size && loaded >= info.size) break;
+        if (chunk.length < chunkSize) break; // 短包 = 结束
+      }
+    } finally {
+      await this.close(info.handle).catch(() => {});
+    }
+    return { name: path, bytes: concatBytes(parts), size: loaded };
+  }
+
+  /**
+   * 整文件上传：OPEN(mode=1) → 分块 WRITE（offset 递增）→ CLOSE。
+   * 分块 ≤ 1012 B（单帧上限）；每块一个 xid，串行等待响应（语法简单且对窗口友好）。
+   */
+  async writeFile(path, bytes, opts = {}) {
+    const data = toBytes(bytes);
+    const info = await this.open(path, OPEN_MODE.WRITE);
+    let written = 0;
+    try {
+      while (written < data.length) {
+        const chunk = data.subarray(written, Math.min(written + MAX_WRITE_DATA, data.length));
+        const n = await this.write(info.handle, written, chunk);
+        if (n <= 0) throw new FileError('EIO', 'WRITE 在 offset=' + written + ' 写入 0 字节');
+        written += n;
+        if (opts.onProgress) opts.onProgress({ written, total: data.length });
+      }
+    } finally {
+      await this.close(info.handle).catch(() => {});
+    }
+    return written;
+  }
+}
+
+/** 通道号常量再导出，避免宿主重复 import proto.js（FILE = 2） */
+const FILE_CHANNEL = CHANNEL.FILE;
+
+// [内联镜像] export default FileClient;  ← 经典脚本里无默认导出，忽略
+</script>
+<!-- @source web/app_src/js/05_bridge.js | sha256=613cd8829ce94d47d51cf9837f552b3fbfcab2b89110a9e76d5223655ec2dcd4 | generated by tools/build_web.py -->
+<script id="app-bridge">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · 桥接层
+//
+// 本文件在工具链里**紧跟** web/proto.js 与 web/file.js 的内联镜像之后执行，
+// 作用只有一件事：把内联镜像里的**顶层词法绑定**收敛到一个显式命名空间 `window.MP`。
+//
+// 为什么不直接引用那些名字：
+//   * proto.js / file.js 是 ES module，内联时只删掉 import/export 语法；
+//   * 经典脚本里 `const` / `class` 属于全局词法环境，下一个 <script> 能看见，
+//     但它们是**隐式全局**，一旦重名（比如我自己也想叫 CHANNEL）就会
+//     "Identifier has already been declared" 直接白屏；
+//   * 显式桥接后，应用层只认 `MP.WU.*` / `MP.FILE.*`，重名风险归零，
+//     而且 `web/app_src/selftest.mjs` 可以在 node 里用同一个桥接跑纯逻辑测试。
+//
+// ⚠️ 这里列出的每个名字都必须在内联镜像里真实存在；写错一个，
+//    页面在解析后会立刻抛 ReferenceError（自检的"vm 执行"用例会抓到）。
+//    改 proto.js / file.js 的导出面时，**必须同步改这里**。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+
+  MP.WU = {
+    // 常量
+    MAGIC: MAGIC,
+    MAGIC0: MAGIC0,
+    MAGIC1: MAGIC1,
+    VERSION: VERSION,
+    HDR_LEN: HDR_LEN,
+    MAX_PAYLOAD: MAX_PAYLOAD,
+    MAX_FRAME: MAX_FRAME,
+    CHANNEL: CHANNEL,
+    CHANNEL_NAMES: CHANNEL_NAMES,
+    CHANNEL_MAX: CHANNEL_MAX,
+    CHANNEL_INFO: CHANNEL_INFO,
+    FLAGS: FLAGS,
+    OP: OP,
+    OP_NAMES: OP_NAMES,
+    STATUS: STATUS,
+    STATUS_NAMES: STATUS_NAMES,
+    CAP: CAP,
+    FILE_OP: FILE_OP,
+    FILE_OP_NAMES: FILE_OP_NAMES,
+    PROTO_VERSION: PROTO_VERSION,
+    CTRL_HDR_LEN: CTRL_HDR_LEN,
+    FILE_HDR_LEN: FILE_HDR_LEN,
+    VIDEO_HDR_LEN: VIDEO_HDR_LEN,
+    TELEM_LEN: TELEM_LEN,
+    WINDOW: WINDOW,
+    ACK_TIMEOUT_MS: ACK_TIMEOUT_MS,
+    MAX_RETX: MAX_RETX,
+    LINK_DOWN_MS: LINK_DOWN_MS,
+    HELLO_PERIOD_MS: HELLO_PERIOD_MS,
+    PING_PERIOD_MS: PING_PERIOD_MS,
+    TELEM_PERIOD_MS: TELEM_PERIOD_MS,
+
+    // 小工具与编解码
+    toBytes: toBytes,
+    hexToBytes: hexToBytes,
+    bytesToHex: bytesToHex,
+    utf8ToBytes: utf8ToBytes,
+    bytesToUtf8: bytesToUtf8,
+    rd16: rd16,
+    rd32: rd32,
+    wr16: wr16,
+    wr32: wr32,
+    crc16: crc16,
+    crc16OfFrame: crc16OfFrame,
+    encodeFrame: encodeFrame,
+    fragmentMessage: fragmentMessage,
+
+    // 解码 / 重组 / 可靠通道 / 会话
+    FrameDecoder: FrameDecoder,
+    Assembler: Assembler,
+    ReliableChannel: ReliableChannel,
+    LinkSession: LinkSession,
+
+    // 载荷编解码
+    ctrlPayload: ctrlPayload,
+    parseCtrl: parseCtrl,
+    filePayload: filePayload,
+    parseFile: parseFile,
+    parseTelem: parseTelem
+  };
+
+  MP.FILE = {
+    FILE_NAME_LEN: FILE_NAME_LEN,
+    FILE_ENTRY_LEN: FILE_ENTRY_LEN,
+    MAX_WRITE_DATA: MAX_WRITE_DATA,
+    MAX_READ_DATA: MAX_READ_DATA,
+    OPEN_MODE: OPEN_MODE,
+    DEFAULT_XID_TIMEOUT_MS: DEFAULT_XID_TIMEOUT_MS,
+    DEFAULT_SEND_RETRY_MS: DEFAULT_SEND_RETRY_MS,
+    STATUS_NAME: STATUS_NAME,
+    FILE_CHANNEL: FILE_CHANNEL,
+
+    FileError: FileError,
+    FileClient: FileClient,
+
+    encodeFileMessage: encodeFileMessage,
+    decodeFileMessage: decodeFileMessage,
+    encodeListEntries: encodeListEntries,
+    decodeListEntries: decodeListEntries,
+    encodeOpenRsp: encodeOpenRsp,
+    decodeOpenRsp: decodeOpenRsp,
+    encodeReadReq: encodeReadReq,
+    decodeReadReq: decodeReadReq,
+    encodeWriteReq: encodeWriteReq,
+    decodeWriteReq: decodeWriteReq,
+    encodeWriteRsp: encodeWriteRsp,
+    decodeWriteRsp: decodeWriteRsp,
+    encodeHandle: encodeHandle,
+    encodeRenameBody: encodeRenameBody
+  };
+
+  // 供自检与页面诊断使用：一眼看出镜像版本（由 proto.js 的常量派生，不写死数字）
+  MP.meta = {
+    protoVersion: PROTO_VERSION,
+    maxPayload: MAX_PAYLOAD,
+    window: WINDOW,
+    ackTimeoutMs: ACK_TIMEOUT_MS,
+    linkDownMs: LINK_DOWN_MS,
+    fileEntryLen: FILE_ENTRY_LEN
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/10_util.js | sha256=8bdb6ebaa0d9823f862c80fc4d80d8acd2ef5313f8b9b72861bd178da4ad9e6f | generated by tools/build_web.py -->
+<script id="app-util">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · 通用小工具（不碰 DOM、不碰协议状态）
+//
+// 纯函数为主：格式化、路径处理、错误文本。方便在 node 自检里直接调用。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var U = MP.util = {};
+
+  /* ------------------------------------------------------------------ 格式 */
+
+  U.pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
+  U.pad3 = function (n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; };
+
+  /** 本地时间 HH:MM:SS.mmm（日志时间戳） */
+  U.fmtClock = function (t) {
+    var d = new Date(t === undefined ? Date.now() : t);
+    return U.pad2(d.getHours()) + ':' + U.pad2(d.getMinutes()) + ':' + U.pad2(d.getSeconds()) +
+      '.' + U.pad3(d.getMilliseconds());
+  };
+
+  /** 本地时间 YYYY-MM-DD HH:MM:SS（写文件用，带时区偏移，便于肉眼核对） */
+  U.fmtStamp = function (t) {
+    var d = new Date(t === undefined ? Date.now() : t);
+    var offMin = -d.getTimezoneOffset();
+    var sign = offMin >= 0 ? '+' : '-';
+    var ah = Math.floor(Math.abs(offMin) / 60);
+    var am = Math.abs(offMin) % 60;
+    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate()) + ' ' +
+      U.pad2(d.getHours()) + ':' + U.pad2(d.getMinutes()) + ':' + U.pad2(d.getSeconds()) +
+      ' (UTC' + sign + U.pad2(ah) + ':' + U.pad2(am) + ')';
+  };
+
+  /** 1234567 -> "1,234,567"（不用 toLocaleString，避免不同环境分隔符不一致） */
+  U.fmtInt = function (n) {
+    var v = Number(n);
+    if (!isFinite(v)) return String(n);
+    var neg = v < 0;
+    var s = String(Math.abs(Math.trunc(v)));
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 === 0) out += ',';
+      out += s[i];
+    }
+    return (neg ? '-' : '') + out;
+  };
+
+  /** 字节数 → 便于阅读的 B / KB / MB */
+  U.fmtBytes = function (n, digits) {
+    var v = Number(n);
+    if (!isFinite(v)) return String(n);
+    var d = (digits === undefined) ? 1 : digits;
+    if (Math.abs(v) < 1024) return Math.trunc(v) + ' B';
+    if (Math.abs(v) < 1024 * 1024) return (v / 1024).toFixed(d) + ' KB';
+    if (Math.abs(v) < 1024 * 1024 * 1024) return (v / 1024 / 1024).toFixed(d) + ' MB';
+    return (v / 1024 / 1024 / 1024).toFixed(d) + ' GB';
+  };
+
+  /** 毫秒 → "1h 02m 03s" / "02m 03s" / "3.2s" */
+  U.fmtDuration = function (ms) {
+    var v = Number(ms) || 0;
+    if (v < 1000) return v + ' ms';
+    var s = Math.floor(v / 1000);
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    if (h > 0) return h + 'h ' + U.pad2(m) + 'm ' + U.pad2(sec) + 's';
+    if (m > 0) return m + 'm ' + U.pad2(sec) + 's';
+    return sec + 's';
+  };
+
+  /** 码率：bytes/秒 → "123.4 kbps"（1 kbit = 1000 bit） */
+  U.fmtKbps = function (bytesPerSec) {
+    var v = Number(bytesPerSec) || 0;
+    var kbps = v * 8 / 1000;
+    if (kbps >= 1000) return (kbps / 1000).toFixed(2) + ' Mbps';
+    if (kbps >= 10) return kbps.toFixed(0) + ' kbps';
+    return kbps.toFixed(1) + ' kbps';
+  };
+
+  /** 错误对象 → 可读文本（永远不返回 "undefined"） */
+  U.errText = function (e) {
+    if (!e) return '(未知错误)';
+    var name = e.name || (e.constructor && e.constructor.name) || 'Error';
+    var msg = e.message || String(e);
+    if (!msg) return name;
+    return (name === 'Error' ? '' : name + ': ') + msg;
+  };
+
+  /** 数组/类数组 → 普通数组（Uint8Array 也适用） */
+  U.toArray = function (x) {
+    var out = [];
+    if (!x) return out;
+    for (var i = 0; i < x.length; i++) out.push(x[i]);
+    return out;
+  };
+
+  /** 拼接若干 Uint8Array */
+  U.concatBytes = function (list) {
+    var n = 0, i;
+    for (i = 0; i < list.length; i++) n += list[i].length;
+    var out = new Uint8Array(n);
+    var off = 0;
+    for (i = 0; i < list.length; i++) { out.set(list[i], off); off += list[i].length; }
+    return out;
+  };
+
+  /** 字节数组是否以给定尾部结尾（MJPEG 用 0xFF 0xD9 判定一帧完整） */
+  U.endsWith = function (bytes, tail) {
+    if (!bytes || !tail || bytes.length < tail.length) return false;
+    var off = bytes.length - tail.length;
+    for (var i = 0; i < tail.length; i++) if (bytes[off + i] !== tail[i]) return false;
+    return true;
+  };
+
+  /* ------------------------------------------------------------------ 路径 */
+  // 设备侧路径一律用 POSIX 风格、绝对路径、以 '/' 开头；根目录就是 "/"。
+  // 这里不做 URL 编码，也不允许反斜杠（Windows 用户输入会转成 '/'）。
+
+  U.normalizePath = function (p) {
+    var s = String(p === undefined || p === null ? '/' : p).replace(/\\/g, '/');
+    var parts = s.split('/');
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var seg = parts[i];
+      if (!seg || seg === '.') continue;
+      if (seg === '..') { out.pop(); continue; }
+      out.push(seg);
+    }
+    return '/' + out.join('/');
+  };
+
+  U.joinPath = function (dir, name) {
+    var d = U.normalizePath(dir);
+    var n = String(name === undefined || name === null ? '' : name).replace(/\\/g, '/');
+    if (n.charAt(0) === '/') return U.normalizePath(n);
+    return U.normalizePath((d === '/' ? '' : d) + '/' + n);
+  };
+
+  U.parentPath = function (p) {
+    var s = U.normalizePath(p);
+    if (s === '/') return '/';
+    var i = s.lastIndexOf('/');
+    return i <= 0 ? '/' : s.slice(0, i);
+  };
+
+  U.baseName = function (p) {
+    var s = U.normalizePath(p);
+    if (s === '/') return '/';
+    return s.slice(s.lastIndexOf('/') + 1);
+  };
+
+  U.splitPath = function (p) {
+    var s = U.normalizePath(p);
+    if (s === '/') return [];
+    return s.slice(1).split('/');
+  };
+
+  /** 目录项名字是否合法（新建/重命名用）：非空、无路径分隔符、不是 . / .. */
+  U.isValidName = function (name) {
+    var s = String(name === undefined || name === null ? '' : name);
+    if (!s || s === '.' || s === '..') return false;
+    if (s.length > 200) return false;
+    if (/[\/\\\u0000]/.test(s)) return false;
+    return true;
+  };
+
+  /* ------------------------------------------------------------------ 杂项 */
+
+  U.sleep = function (ms) {
+    return new Promise(function (resolve) { root.setTimeout(resolve, ms); });
+  };
+
+  /** 只保留最近 n 条，避免长时间运行把内存吃光 */
+  U.trimArray = function (arr, n) {
+    if (arr.length > n) arr.splice(0, arr.length - n);
+    return arr;
+  };
+
+  /** 求平均值（空数组返回 0） */
+  U.mean = function (arr) {
+    if (!arr || !arr.length) return 0;
+    var s = 0;
+    for (var i = 0; i < arr.length; i++) s += arr[i];
+    return s / arr.length;
+  };
+
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/20_usb.js | sha256=48404aaf60b018491a4e750054ead1062abd35c4ae371ad29f23776f9a85435f | generated by tools/build_web.py -->
+<script id="app-usb">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · WebUSB 传输层
+//
+// 只负责"把字节搬进搬出"，不解析协议（协议在 MP.WU / MP.Link 里）。
+//
+// 冻结的物理分配（docs/contracts/frozen-allocation.md §1/§2）：
+//   IF0  MTP（不 claim）
+//   IF1  Vendor 视频 —— 只有 IN，EP3 = 0x83（HS bulk 512）
+//   IF2  Vendor 控制 —— IN EP4 = 0x84 / OUT EP4 = 0x04（HS bulk 512）
+//   IF3/4 NCM（不 claim）
+//
+// 三条必须遵守的现场经验（docs/protocol.md §4.1 + docs/probe-report.md）：
+//   1. 0 字节 transferIn（ZLP）**合法**，计数后继续读，绝不当中止条件；
+//   2. 两个接口各自独立读、各自独立帧解码（跨端点拼接字节是错的）；
+//   3. OUT 必须**串行**写（并发 transferOut 的顺序没有保证）。
+//
+// 本模块不假设"一定能连上"：claim IF1 失败会降级成"仅控制模式"，
+// 并把可读原因（很可能是固件没给 IF1 绑 WinUSB/WCID）交给 UI。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var U = MP.util;
+
+  var VID = 0x303A;
+  var PID = 0x4103;
+  var IF_VIDEO = 1;
+  var IF_CTRL = 2;
+
+  var VIDEO_READ_LEN = 8192;     // 视频端点单次读：够大以减少 WebUSB 往返
+  var CTRL_READ_LEN = 4096;      // 控制端点（CTRL/FILE/LOG/TELEM）
+  var OUT_TIMEOUT_MS = 5000;     // transferOut 兜底：绝不无限挂起
+
+  function usbUnavailable() {
+    return !(root.navigator && root.navigator.usb);
+  }
+
+  /** 可读的 claim 失败判读（中文） */
+  function claimHint(err, ifaceNo, role) {
+    var name = (err && err.name) || '';
+    var what = ifaceNo === IF_VIDEO ? 'IF1（视频，EP 0x83 IN）' : 'IF2（控制，EP 0x84 IN / 0x04 OUT）';
+    var who = role === '视频' ? '视频通道' : '控制/文件通道';
+    if (name === 'SecurityError' || name === 'InvalidStateError') {
+      return '接口 ' + what + ' 的 claim 被拒绝：Chrome 只能 claim「驱动已绑定为 WinUSB」的接口。\n' +
+        '  · ' + (ifaceNo === IF_VIDEO
+          ? 'IF1 需要固件里带 IF1 的 MS OS 2.0 Function Subset + WINUSB 兼容 ID（WCID）。请确认已烧写含 IF1 WCID 的固件。'
+          : 'IF2 的 WCID 应已随固件下发；若仍失败，看设备管理器里 MI_02 的驱动是不是 winusb.sys。') + '\n' +
+        '  · 烧写/换描述符后必须**关闭本页并拔插一次 USB**，让 Windows 重新读取 MS OS 描述符（bcdDevice 变了才会刷新）。\n' +
+        '  · 关掉其它正在占用该设备的 Chrome 标签页（同一接口只能被一个页面 claim），必要时在 chrome://device-log 看拒绝原因。\n' +
+        '  · 兜底：用 Zadig 给「MeidaP4 WebUSB」对应接口装 WinUSB（开发期可接受）。\n' +
+        '  ⇒ ' + who + '不可用。';
+    }
+    if (name === 'NotFoundError') {
+      return '接口 ' + what + ' 在当前配置里不存在：本页按冻结分配表找 IF1/IF2。\n' +
+        '  · 若设备是探测期固件（PID 0x4001/0x4002），接口号完全不同；本页只认 PID 0x4103 的完整版复合设备。\n' +
+        '  · 也可能是 selectConfiguration 没生效（先「断开」再重连）。';
+    }
+    if (name === 'NetworkError') {
+      return '接口 ' + what + ' 的 claim 期间设备断开/复位了。请重新插拔后重试。';
+    }
+    return '接口 ' + what + ' 的 claim 失败（' + (name || '未知错误') + '）。看上方日志里的 err.name / err.message 原文，' +
+      '或查 chrome://device-log。';
+  }
+
+  function withTimeout(promise, ms, what) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = root.setTimeout(function () {
+        if (done) return;
+        done = true;
+        var e = new Error(what + ' 超时（' + ms + ' ms）');
+        e.name = 'ETIMEDOUT';
+        reject(e);
+      }, ms);
+      promise.then(function (v) {
+        if (done) return;
+        done = true;
+        root.clearTimeout(timer);
+        resolve(v);
+      }, function (e) {
+        if (done) return;
+        done = true;
+        root.clearTimeout(timer);
+        reject(e);
+      });
+    });
+  }
+
+  /* ==================================================================== */
+
+  function Usb(opts) {
+    opts = opts || {};
+    var self = this;
+
+    this.device = null;
+    this.claimed = { video: false, ctrl: false };
+    this.eps = { videoIn: null, ctrlIn: null, ctrlOut: null };
+
+    /** 上层挂进来的数据回调：{control(bytes), video(bytes)} */
+    this.handlers = { control: null, video: null };
+
+    this.zeroLenReads = { control: 0, video: 0 };
+    this.reads = { control: 0, video: 0 };
+    this.rxBytes = { control: 0, video: 0 };
+    this.txBytes = 0;
+    this.stalls = 0;
+    this.readErrors = 0;
+    this.handlerErrors = 0;
+    this.outErrors = 0;
+    this.outTimeouts = 0;
+    this.outDropped = 0;
+    this.outQueued = 0;
+
+    this.opened = false;
+    this.disconnected = false;
+    this._running = false;
+    this._outQueue = [];
+    this._outBusy = false;
+    this._readTasks = [];
+    this._onUsbDisconnect = null;
+
+    this.onLog = opts.log || function () {};
+    this.onDisconnect = opts.onDisconnect || null;
+    this.onZlp = opts.onZlp || null;
+    this.onError = opts.onError || null;
+  }
+
+  Usb.VID = VID;
+  Usb.PID = PID;
+  Usb.IF_VIDEO = IF_VIDEO;
+  Usb.IF_CTRL = IF_CTRL;
+
+  Usb.prototype._log = function (level, text) { this.onLog(level, text); };
+
+  Usb.prototype._fail = function (e, hint) {
+    if (hint && e && !e.hint) {
+      try { e.hint = hint; } catch (ignore) { /* 某些 DOMException 的字段只读 */ }
+    }
+    if (this.onError) this.onError(e);
+    return e;
+  };
+
+  /* --------------------------------------------------------------- 连接 */
+
+  /**
+   * 弹窗选设备 → open → 选配置 → claim IF1(视频) / IF2(控制) → 找端点。
+   *
+   * @returns {Promise<{video:{ok:boolean,error:Error|null,endpoint:number|null},
+   *                    ctrl:{ok:boolean,epIn:number,epOut:number}}>}
+   *          IF2 claim 失败会 **throw**（没有控制通道，页面无意义）；
+   *          IF1 失败只降级（文件/日志可用，画面不可用）。
+   */
+  Usb.prototype.connect = async function () {
+    var self = this;
+    if (usbUnavailable()) {
+      throw this._fail(new Error('此浏览器不支持 WebUSB（navigator.usb 不存在）。' +
+        '请用 Chrome / Edge，并把页面放在 file:// 或 http://localhost 等安全上下文下打开。'));
+    }
+    if (this.device && this.opened) {
+      throw this._fail(new Error('设备已经连接（先点「断开」再重连）。'));
+    }
+
+    this._log('info', 'requestDevice(filters=[{vendorId:0x303A, productId:0x4103}]) …');
+    var dev;
+    try {
+      dev = await root.navigator.usb.requestDevice({ filters: [{ vendorId: VID, productId: PID }] });
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') {
+        throw this._fail(new Error('请求设备被取消或没有匹配设备：请插稳 P4，确认设备管理器里出现 ' +
+          'VID_303A&PID_4103 的复合设备（不是探测期的 0x4001/0x4002）。'), e.hint);
+      }
+      throw this._fail(e);
+    }
+    if (!dev) throw this._fail(new Error('requestDevice 返回空（用户取消或没有匹配设备）。'));
+
+    this.device = dev;
+    this.disconnected = false;
+    this._log('ok', '已选中设备：' + (dev.productName || '(无产品名)') +
+      '  VID=0x' + (dev.vendorId || 0).toString(16).toUpperCase() +
+      '  PID=0x' + (dev.productId || 0).toString(16).toUpperCase() +
+      '  序列号=' + (dev.serialNumber || '(无)'));
+
+    try {
+      if (!dev.opened) await dev.open();
+    } catch (e) {
+      throw this._fail(new Error('设备 open() 失败：' + U.errText(e) +
+        '\n  · 可能被其它页面/程序占用（关闭其它 Chrome 标签页或 Zadig 之类的工具）。'), e.hint);
+    }
+    this.opened = true;
+    this._log('ok', 'device.open() 成功');
+
+    // 选择配置（复合设备只有一个配置；configuration 为 null 时必须显式选）
+    try {
+      if (!dev.configuration) {
+        var cfgs = dev.configurations || [];
+        if (!cfgs.length) {
+          throw this._fail(new Error('设备没有可用配置（configuration 为 null 且 configurations 为空）。' +
+            '多半是刚复位/枚举未完成，拔插后重试。'));
+        }
+        await dev.selectConfiguration(cfgs[0].configurationValue);
+        this._log('ok', 'selectConfiguration(' + cfgs[0].configurationValue + ') 成功');
+      } else {
+        this._log('info', '设备已处于配置 ' + dev.configuration.configurationValue);
+      }
+    } catch (e) {
+      if (e && e.hint) throw e;   // 上面自定义的
+      throw this._fail(new Error('selectConfiguration 失败：' + U.errText(e)), e.hint);
+    }
+
+    this._log('info', this.describeInterfaces());
+
+    // 监听拔出（顺便在 close() 里摘掉）
+    if (root.navigator.usb && root.navigator.usb.addEventListener) {
+      this._onUsbDisconnect = function (ev) {
+        if (ev && ev.device && ev.device === self.device) self._handleGone('设备拔出（disconnect 事件）');
+      };
+      root.navigator.usb.addEventListener('disconnect', this._onUsbDisconnect);
+    }
+
+    var result = {
+      video: { ok: false, error: null, endpoint: null },
+      ctrl: { ok: false, epIn: null, epOut: null }
+    };
+
+    // ---- IF2（控制）：没有它页面就没意义，失败直接抛 ----
+    try {
+      await this._claim(IF_CTRL);
+      this.claimed.ctrl = true;
+      var cIn = this.findEndpoint(IF_CTRL, 'in', 'bulk');
+      var cOut = this.findEndpoint(IF_CTRL, 'out', 'bulk');
+      if (!cIn || !cOut) {
+        throw this._fail(new Error('IF2 缺少 bulk IN 或 OUT 端点（冻结分配要求 0x84 / 0x04）。' +
+          '当前配置：' + this.describeInterfaces()));
+      }
+      this.eps.ctrlIn = cIn.endpointNumber;
+      this.eps.ctrlOut = cOut.endpointNumber;
+      result.ctrl = { ok: true, epIn: cIn.endpointNumber, epOut: cOut.endpointNumber };
+      this._log('ok', 'claimInterface(2) 成功：控制 IN=0x' + (0x80 | cIn.endpointNumber).toString(16) +
+        '，控制 OUT=0x' + cOut.endpointNumber.toString(16) +
+        '（wMaxPacketSize=' + (cIn.packetSize || '?') + '）');
+    } catch (e) {
+      this._fail(e, claimHint(e, IF_CTRL, '控制'));
+      throw e;
+    }
+
+    // ---- IF1（视频）：可选，失败降级 ----
+    try {
+      await this._claim(IF_VIDEO);
+      this.claimed.video = true;
+      var vIn = this.findEndpoint(IF_VIDEO, 'in', 'bulk');
+      if (!vIn) {
+        throw this._fail(new Error('IF1 缺少 bulk IN 端点（冻结分配要求 0x83）。'));
+      }
+      this.eps.videoIn = vIn.endpointNumber;
+      result.video = { ok: true, error: null, endpoint: vIn.endpointNumber };
+      this._log('ok', 'claimInterface(1) 成功：视频 IN=0x' + (0x80 | vIn.endpointNumber).toString(16) +
+        '（wMaxPacketSize=' + (vIn.packetSize || '?') + '）');
+    } catch (e) {
+      result.video = { ok: false, error: e, endpoint: null };
+      this._fail(e, claimHint(e, IF_VIDEO, '视频'));
+      this._log('warn', 'IF1（视频）claim 失败，已降级为「仅控制模式」：文件/日志/遥测可用，画面不可用。');
+      this._log('warn', '原因：' + U.errText(e));
+      // 视频接口留空；为了安全，把可能半成功的 claim 释放掉
+      try { await this._release(IF_VIDEO); } catch (ignore) { /* 没 claim 上就算了 */ }
+      this.claimed.video = false;
+    }
+
+    return result;
+  };
+
+  Usb.prototype._claim = async function (ifaceNumber) {
+    if (!this.device || !this.device.configuration) {
+      throw new Error('还没 selectConfiguration，无法 claimInterface(' + ifaceNumber + ')');
+    }
+    var itf = null;
+    var list = this.device.configuration.interfaces || [];
+    for (var i = 0; i < list.length; i++) if (list[i].interfaceNumber === ifaceNumber) itf = list[i];
+    if (!itf) {
+      var e = new Error('当前配置里没有接口 IF' + ifaceNumber);
+      e.name = 'NotFoundError';
+      throw e;
+    }
+    if (itf.claimed) {
+      this._log('warn', 'IF' + ifaceNumber + ' 已被本页 claim，先 release 再 claim');
+      try { await this.device.releaseInterface(ifaceNumber); } catch (ignore) { /* 继续尝试 */ }
+    }
+    try {
+      await this.device.claimInterface(ifaceNumber);
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  Usb.prototype._release = async function (ifaceNumber) {
+    if (!this.device || !this.opened) return;
+    try { await this.device.releaseInterface(ifaceNumber); }
+    catch (e) { this._log('warn', 'releaseInterface(' + ifaceNumber + ') 失败：' + U.errText(e)); }
+  };
+
+  /** 在已激活的 alternate setting 里找一个端点 */
+  Usb.prototype.findEndpoint = function (ifaceNumber, direction, type) {
+    if (!this.device || !this.device.configuration) return null;
+    var list = this.device.configuration.interfaces || [];
+    var itf = null;
+    for (var i = 0; i < list.length; i++) if (list[i].interfaceNumber === ifaceNumber) itf = list[i];
+    if (!itf) return null;
+    var alt = itf.alternate || (itf.alternates && itf.alternates.length ? itf.alternates[0] : null);
+    var eps = (alt && alt.endpoints) || [];
+    var typed = null, anyDir = null;
+    for (var k = 0; k < eps.length; k++) {
+      if (eps[k].direction !== direction) continue;
+      if (!anyDir) anyDir = eps[k];
+      if (!type || eps[k].type === type) { typed = eps[k]; break; }
+    }
+    return typed || anyDir;
+  };
+
+  /** 端点/接口清单（日志用；不假设一定齐） */
+  Usb.prototype.describeInterfaces = function () {
+    var d = this.device;
+    if (!d || !d.configuration) return '接口清单：(未配置)';
+    var lines = ['配置 ' + d.configuration.configurationValue + ' 的接口：'];
+    var list = d.configuration.interfaces || [];
+    for (var i = 0; i < list.length; i++) {
+      var itf = list[i];
+      var alt = itf.alternate || (itf.alternates && itf.alternates[0]) || null;
+      var eps = (alt && alt.endpoints) || [];
+      var desc = [];
+      for (var k = 0; k < eps.length; k++) {
+        var ep = eps[k];
+        desc.push((ep.direction === 'in' ? 'IN 0x' + (0x80 | ep.endpointNumber).toString(16)
+          : 'OUT 0x' + ep.endpointNumber.toString(16)) + ' ' + ep.type + ' ' + (ep.packetSize || '?') + 'B');
+      }
+      lines.push('  IF' + itf.interfaceNumber + (itf.claimed ? ' [已 claim]' : '') +
+        '  类=0x' + Number((alt && alt.interfaceClass) || 0).toString(16) +
+        '  端点: ' + (desc.length ? desc.join(' / ') : '(无)'));
+    }
+    return lines.join('\n');
+  };
+
+  /* --------------------------------------------------------------- 读 */
+
+  Usb.prototype.startReads = function () {
+    if (this._running) return;
+    this._running = true;
+    if (this.claimed.ctrl && this.eps.ctrlIn !== null) {
+      this._readTasks.push(this._readLoop('control', this.eps.ctrlIn, CTRL_READ_LEN));
+    }
+    if (this.claimed.video && this.eps.videoIn !== null) {
+      this._readTasks.push(this._readLoop('video', this.eps.videoIn, VIDEO_READ_LEN));
+    }
+    this._log('info', '已启动持续读循环：' + this._readTasks.length + ' 个端点（0 字节读 = 合法 ZLP，会计数后继续）');
+  };
+
+  Usb.prototype._readLoop = async function (kind, epNumber, readLen) {
+    var self = this;
+    var consecutiveErrors = 0;
+    var consecutiveStalls = 0;
+
+    while (this._running && this.device && this.opened) {
+      var res;
+      try {
+        res = await this.device.transferIn(epNumber, readLen);
+      } catch (e) {
+        if (!this._running) break;
+        this.readErrors++;
+        consecutiveErrors++;
+        // 拔出 / 复位：读会以 NetworkError 拒绝，这只意味着"会话结束"，不是帧错误
+        if (e && (e.name === 'NetworkError' || e.name === 'NotFoundError')) {
+          this._handleGone(kind + ' IN 读取中止：' + U.errText(e));
+          break;
+        }
+        this._log('warn', kind + ' IN 读取异常（第 ' + consecutiveErrors + ' 次）：' + U.errText(e));
+        if (consecutiveErrors >= 5) {
+          this._handleGone(kind + ' IN 连续 ' + consecutiveErrors + ' 次读取异常，停止读循环');
+          break;
+        }
+        await U.sleep(Math.min(50 * consecutiveErrors, 500));
+        continue;
+      }
+      consecutiveErrors = 0;
+      if (!this._running) break;
+      this.reads[kind]++;
+
+      if (!res || res.status !== 'ok') {
+        // 'stall' 可能是端点被 halt（例如设备侧异常）。尝试 clearHalt 后继续；不做致命判决。
+        this.stalls++;
+        consecutiveStalls++;
+        this._log('warn', kind + ' IN 传输 status=' + (res && res.status) + '（累计 ' + this.stalls + ' 次）');
+        try { await this.device.clearHalt('in', epNumber); } catch (ignore) { /* 尽力而为 */ }
+        if (consecutiveStalls >= 8) {
+          this._handleGone(kind + ' IN 连续 ' + consecutiveStalls + ' 次 STALL，停止读循环');
+          break;
+        }
+        await U.sleep(60);
+        continue;
+      }
+      consecutiveStalls = 0;
+
+      var data = res.data;
+      if (!data || data.byteLength === 0) {
+        // ★ 0 字节是合法 ZLP（docs/protocol.md §4.1）：计数、通知、继续读，绝不中止。
+        this.zeroLenReads[kind]++;
+        if (this.onZlp) {
+          try { this.onZlp(kind, this.zeroLenReads[kind]); } catch (ignore) { /* 回调不得影响读循环 */ }
+        }
+        continue;
+      }
+
+      var view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      this.rxBytes[kind] += view.length;
+      var handler = (kind === 'video') ? this.handlers.video : this.handlers.control;
+      if (typeof handler === 'function') {
+        try {
+          handler(view);
+        } catch (e) {
+          // 上层解析异常绝不能打死读循环（否则一个坏帧就让画面永久冻住）
+          this.handlerErrors++;
+          if (this.handlerErrors <= 5 || this.handlerErrors % 100 === 0) {
+            this._log('err', kind + ' 数据回调异常（第 ' + this.handlerErrors + ' 次）：' + U.errText(e));
+          }
+        }
+      }
+    }
+  };
+
+  /* --------------------------------------------------------------- 写 */
+
+  /**
+   * 把一帧（已编码的 12 B 头 + payload）排进 OUT 队列。
+   * 返回 true = 已入队（协议层据此认为"发出去了"，重传由 200 ms 超时兜底）。
+   */
+  Usb.prototype.sendBytes = function (bytes) {
+    if (!this.device || !this.opened || !this.claimed.ctrl || this.eps.ctrlOut === null) return false;
+    if (!bytes || !bytes.length) return false;
+    if (this._outQueue.length >= 512) {
+      this._outQueue.shift();          // 极端拥塞：丢最老的，保证控制帧不无限堆积
+      this.outDropped++;
+    }
+    this._outQueue.push(bytes);
+    this.outQueued++;
+    this._pumpOut();
+    return true;
+  };
+
+  Usb.prototype._pumpOut = function () {
+    var self = this;
+    if (this._outBusy) return;
+    this._outBusy = true;
+    (async function () {
+      while (self._outQueue.length) {
+        if (!self.device || !self.opened) break;
+        var chunk = self._outQueue.shift();
+        try {
+          var res = await withTimeout(
+            self.device.transferOut(self.eps.ctrlOut, chunk), OUT_TIMEOUT_MS, 'transferOut');
+          if (!res || res.status !== 'ok') {
+            self.outErrors++;
+            if (self.outErrors <= 5) self._log('warn', 'transferOut status=' + (res && res.status) + '（帧未送达，等超时重传）');
+          } else {
+            self.txBytes += (res.bytesWritten || chunk.length);
+          }
+        } catch (e) {
+          if (e && e.name === 'ETIMEDOUT') {
+            self.outTimeouts++;
+            if (self.outTimeouts <= 5) self._log('warn', 'transferOut 超时（设备 NAK？该帧由可靠通道超时重传）');
+          } else {
+            self.outErrors++;
+            if (e && (e.name === 'NetworkError' || e.name === 'NotFoundError')) {
+              self._handleGone('OUT 写入中止：' + U.errText(e));
+              break;
+            }
+            if (self.outErrors <= 5) self._log('warn', 'transferOut 异常：' + U.errText(e));
+          }
+        }
+      }
+      self._outBusy = false;
+    })();
+  };
+
+  /* --------------------------------------------------------------- 收尾 */
+
+  Usb.prototype._handleGone = function (reason) {
+    if (this.disconnected) return;
+    this.disconnected = true;
+    this._running = false;
+    this._outQueue.length = 0;
+    this._log('warn', reason);
+    if (this.onDisconnect) {
+      try { this.onDisconnect(reason); } catch (ignore) { /* 回调异常不得影响收尾 */ }
+    }
+  };
+
+  Usb.prototype.close = async function () {
+    this._running = false;
+    this._outQueue.length = 0;
+    if (this._onUsbDisconnect && root.navigator.usb && root.navigator.usb.removeEventListener) {
+      try { root.navigator.usb.removeEventListener('disconnect', this._onUsbDisconnect); } catch (ignore) { /* 忽略 */ }
+      this._onUsbDisconnect = null;
+    }
+    if (this.device && this.opened) {
+      if (this.claimed.video) { await this._release(IF_VIDEO); this.claimed.video = false; }
+      if (this.claimed.ctrl) { await this._release(IF_CTRL); this.claimed.ctrl = false; }
+      try { await this.device.close(); } catch (e) { this._log('warn', 'device.close() 异常：' + U.errText(e)); }
+      this._log('info', '已释放接口并关闭设备');
+    }
+    this.opened = false;
+    this.device = null;
+    this.eps = { videoIn: null, ctrlIn: null, ctrlOut: null };
+    this.handlers = { control: null, video: null };
+  };
+
+  /** 诊断快照（UI 每几百毫秒取一次） */
+  Usb.prototype.snapshot = function () {
+    return {
+      opened: this.opened,
+      disconnected: this.disconnected,
+      videoClaimed: this.claimed.video,
+      ctrlClaimed: this.claimed.ctrl,
+      eps: { videoIn: this.eps.videoIn, ctrlIn: this.eps.ctrlIn, ctrlOut: this.eps.ctrlOut },
+      zeroLenReads: { control: this.zeroLenReads.control, video: this.zeroLenReads.video },
+      reads: { control: this.reads.control, video: this.reads.video },
+      rxBytes: { control: this.rxBytes.control, video: this.rxBytes.video },
+      txBytes: this.txBytes,
+      stalls: this.stalls,
+      readErrors: this.readErrors,
+      handlerErrors: this.handlerErrors,
+      outErrors: this.outErrors,
+      outTimeouts: this.outTimeouts,
+      outDropped: this.outDropped,
+      outPending: this._outQueue.length
+    };
+  };
+
+  MP.Usb = Usb;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/30_link.js | sha256=316e89a182ab3598b1d57e3f678f143da2b5869f2a712af83dfcc48067ce0117 | generated by tools/build_web.py -->
+<script id="app-link">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · 链路会话层（I0 协议的主机侧状态机）
+//
+// 本模块是"薄胶水"：把冻结实现 MP.WU.LinkSession（= web/proto.js 的逐字节镜像）
+// 接到 WebUSB 传输层，并把 FILE 通道交给 MP.FILE.FileClient（= web/file.js 镜像）。
+// **协议逻辑一律不在这里重写**：
+//   * HELLO / HELLO_ACK（含 seq 门豁免、引导帧无状态）→ LinkSession
+//   * 可靠窗口 W=8 / 200 ms 重传 / 累计 ACK / 5 次判死 → ReliableChannel（LinkSession 内含）
+//   * 3 s 无有效帧 ⇒ link_down → LinkSession.tick()
+//   * ZLP 计数 → LinkSession.onZeroLenRead()
+//   * FILE 的 xid 配对 / 超时 / 分块读写 → FileClient
+//
+// 主机侧额外只做三件事：
+//   1. 周期 tick（50 ms）驱动重传与 link_down 判定；
+//   2. link_up 后每 5 s 发一个 PING（链路活性探测），只有窗口有空位时才发；
+//   3. 把事件翻译给 UI（HELLO / TELEM / LOG / 链路状态 / 通道异常）。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var WU = MP.WU;
+  var U = MP.util;
+
+  var TICK_MS = 50;
+  var PING_IDLE_MS = 5000;       // link_up 后每 5 s 一次 PING（协议 §5.4 的心跳节奏只约束设备侧）
+  var PING_TIMEOUT_MS = 2000;
+
+  function Link(usb, hooks) {
+    var self = this;
+    this.usb = usb;
+    this.hooks = hooks || {};
+
+    this.session = new WU.LinkSession({
+      send: function (bytes) { return usb.sendBytes(bytes); },
+      now: function () { return Date.now(); }
+    });
+    this.fc = new MP.FILE.FileClient({ session: this.session, timeoutMs: 2500 });
+
+    this._timer = null;
+    this._lastPingMs = 0;
+    this._pingWaiters = [];
+    this._pingSeq = 0;
+    this._lastState = this.session.state;
+
+    // ---- 通道消息派发 ------------------------------------------------
+    this.session.on('message', function (m) {
+      if (m.channel === WU.CHANNEL.FILE) {
+        self.fc.onMessage(m.payload);
+      } else if (m.channel === WU.CHANNEL.TELEM) {
+        var t = WU.parseTelem(m.payload);
+        if (t) self.hooks.onTelem && self.hooks.onTelem(t);
+      } else if (m.channel === WU.CHANNEL.LOG) {
+        var text = WU.bytesToUtf8(m.payload);
+        if (text) self.hooks.onLogLine && self.hooks.onLogLine(text.replace(/\r?\n$/, ''));
+      } else if (m.channel === WU.CHANNEL.VIDEO) {
+        // 视频走 IF1 独立端点；本会话只处理 IF2。这里出现说明端点接错，记一笔。
+        self.hooks.onUnexpected && self.hooks.onUnexpected('控制端点上收到 VIDEO 消息（' + m.payload.length + ' B）');
+      }
+    });
+
+    // ---- CTRL 层事件 --------------------------------------------------
+    this.session.on('ctrl', function (c) {
+      if (c.opcode === WU.OP.HELLO) return;      // 由 'hello' 事件处理
+      if (c.opcode === WU.OP.HELLO_ACK) return;
+      if (c.opcode === WU.OP.PING) { self.hooks.onCtrl && self.hooks.onCtrl('收到设备 PING'); return; }
+      if (c.opcode === WU.OP.ACK) return;        // 每帧都可能有 ACK，别刷屏
+      if (c.opcode === WU.OP.CREDIT) {
+        self.hooks.onCtrl && self.hooks.onCtrl('收到 CREDIT：通道 ' + c.arg + ' 额度 ' +
+          WU.rd16(c.body || [], 0) + ' B（暂不据此调整窗口）');
+        return;
+      }
+      self.hooks.onCtrl && self.hooks.onCtrl('收到 ' + (WU.OP_NAMES[c.opcode] || ('opcode 0x' + c.opcode.toString(16))) +
+        '（status=' + c.status + ' arg=' + c.arg + '）');
+    });
+
+    this.session.on('hello', function (h) {
+      // 设备是序号主导方：LinkSession 已经复位本侧所有 TX seq / RX 期望 / 拼接态。
+      // FILE 的 xid 空间是"每会话"的，也必须一起复位（未完成请求会被 EABORT 拒绝）。
+      self.fc.reset('hello');
+      if (self.hooks.onHello) {
+        self.hooks.onHello({ version: h.version, caps: h.caps, raw: h });
+      }
+    });
+
+    this.session.on('helloAck', function () {
+      if (self.hooks.onHelloAck) self.hooks.onHelloAck();
+    });
+
+    this.session.on('pong', function () {
+      var waiters = self._pingWaiters;
+      self._pingWaiters = [];
+      for (var i = 0; i < waiters.length; i++) {
+        try { waiters[i](); } catch (ignore) { /* 回调异常不影响协议 */ }
+      }
+      if (self.hooks.onPong) self.hooks.onPong();
+    });
+
+    this.session.on('link', function (s) {
+      self._lastState = s.state;
+      if (s.state !== 'up') {
+        // 链路掉了：未完成的文件事务没有意义了（序号将重置）
+        self.fc.reset('link_' + s.state);
+        self._failPingWaiters('链路断开');
+      }
+      if (self.hooks.onLink) self.hooks.onLink(s);
+    });
+
+    this.session.on('gap', function (g) {
+      if (self.hooks.onGap) {
+        self.hooks.onGap('通道 ' + (WU.CHANNEL_NAMES[g.channel] || g.channel) +
+          ' 出现 seq 空洞：收到 ' + g.got + '，期望 ' + g.expected + '（等重传，累计 ACK 停在期望值）');
+      }
+    });
+  }
+
+  /**
+   * 连接后**主动**发几次 HELLO_ACK（直到 link_up）。
+   *
+   * ⚠️ 2026-10-31 真机修正（"无画面 / 几百帧后卡死"的主机侧一半）：
+   * 设备可能是"上一台主机会话留下的 link_up"状态（TX seq 已经涨到几百），而本页
+   * 只在**收到 HELLO** 时才回 HELLO_ACK 并复位序号。设备一直不判 link_down 就永远不发
+   * HELLO ⇒ 本页 rx_expect 停在 1，设备发 569/570… ⇒ 全是"seq 空洞" ⇒ 死锁。
+   * 主动 HELLO_ACK 会强制设备走一次 §6.3 的 link_up 归零，双方序号立刻对齐。
+   * 只在 state !== 'up' 时发；一旦 up 就停（重复发会把正在进行的可靠事务重置掉）。
+   */
+  Link.prototype.helloHandshake = function () {
+    var self = this;
+    if (this._hsTimer) return;
+    var tries = 0;
+    this._hsTimer = setInterval(function () {
+      if (self.session.state === 'up' || ++tries > 60) {
+        clearInterval(self._hsTimer);
+        self._hsTimer = null;
+        return;
+      }
+      try { self.session.sendHelloAck(); } catch (ignore) { /* 端点还没好，下一轮再试 */ }
+    }, 250);
+  };
+  Link.prototype._failPingWaiters = function (why) {    var waiters = this._pingWaiters;
+    this._pingWaiters = [];
+    for (var i = 0; i < waiters.length; i++) {
+      try { waiters[i](new Error(why)); } catch (ignore) { /* 忽略 */ }
+    }
+  };
+
+  Link.prototype.start = function () {
+    var self = this;
+    if (this._timer) return;
+    this._lastPingMs = Date.now();
+    this._timer = root.setInterval(function () { self.tick(); }, TICK_MS);
+  };
+
+  Link.prototype.stop = function () {
+    if (this._timer) { root.clearInterval(this._timer); this._timer = null; }
+    this._failPingWaiters('会话已停止');
+  };
+
+  /** 手动 tick（自检里用假时钟驱动，不依赖 setInterval） */
+  Link.prototype.tick = function (nowMs) {
+    var t = (nowMs === undefined) ? Date.now() : nowMs;
+    this.session.tick(t);
+    if (this.session.state !== 'up') return;
+    if (t - this._lastPingMs < PING_IDLE_MS) return;
+    // 窗口有空位才发（避免把 8 帧窗口塞满 PING、把文件事务饿死）
+    if (this.session.ctrl.space <= 0) return;
+    this._lastPingMs = t;
+    try { this.session.sendPing(); } catch (e) { /* 发送失败下一次再试 */ }
+  };
+
+  /** 把控制端点读到的原始字节喂给会话（由 UI 挂到 usb.handlers.control） */
+  Link.prototype.feedControl = function (bytes) {
+    this.session.onBytes(bytes);
+  };
+
+  /** 传输层报告 0 字节读（ZLP）时调用：只计数，不推进状态（协议 §4.1） */
+  Link.prototype.onZeroLenRead = function () {
+    return this.session.onZeroLenRead();
+  };
+
+  /**
+   * 手动 PING 并测 RTT。
+   * @returns {Promise<number>} RTT 毫秒
+   */
+  Link.prototype.ping = function (timeoutMs) {
+    var self = this;
+    var ms = timeoutMs || PING_TIMEOUT_MS;
+    return new Promise(function (resolve, reject) {
+      if (self.session.state !== 'up') { reject(new Error('链路未建立（还没收到 HELLO）')); return; }
+      if (!self.session.sendPing()) {
+        reject(new Error('PING 没能发出：可靠窗口已满（有未确认帧）——先等文件传输告一段落'));
+        return;
+      }
+      var t0 = Date.now();
+      var done = false;
+      var timer = root.setTimeout(function () {
+        if (done) return;
+        done = true;
+        var idx = self._pingWaiters.indexOf(cb);
+        if (idx >= 0) self._pingWaiters.splice(idx, 1);
+        reject(new Error('PING 超过 ' + ms + ' ms 没有 PONG（设备侧心跳/ACK 可能没实现）'));
+      }, ms);
+      function cb(err) {
+        if (done) return;
+        done = true;
+        root.clearTimeout(timer);
+        if (err) reject(err);
+        else resolve(Date.now() - t0);
+      }
+      self._pingWaiters.push(cb);
+    });
+  };
+
+  /** 便捷发送（UI 的调试按钮用） */
+  Link.prototype.sendPing = function () { return this.session.sendPing(); };
+  Link.prototype.sendCtrl = function (opcode, opts) { return this.session.sendCtrl(opcode, opts); };
+  Link.prototype.sendFile = function (op, opts) { return this.session.sendFile(op, opts); };
+
+  Link.prototype.snapshot = function () {
+    var s = this.session.stats;
+    var ctrl = this.session.ctrl.stats;
+    var file = this.session.file.stats;
+    var fc = this.fc.stats;
+    return {
+      state: s.state,
+      linkUp: s.linkUp,
+      caps: this.session.caps,
+      deviceVersion: this.session.deviceVersion,
+      zeroLenReads: s.zeroLenReads,
+      frames: s.frames,
+      crcErrors: s.crcErrors,
+      resyncBytes: s.resyncBytes,
+      badHeader: s.badHeader,
+      linkUps: s.linkUps,
+      linkDowns: s.linkDowns,
+      rxMessages: s.rxMessages,
+      txMessages: s.txMessages,
+      ctrl: { unacked: ctrl.unacked, sent: ctrl.sent, retransmits: ctrl.retransmits, acked: ctrl.acked, nextSeq: ctrl.nextSeq },
+      file: { unacked: file.unacked, sent: file.sent, retransmits: file.retransmits, acked: file.acked, nextSeq: file.nextSeq },
+      fileClient: {
+        requests: fc.requests, responses: fc.responses, timeouts: fc.timeouts,
+        unmatched: fc.unmatchedResponses, malformed: fc.malformed, pending: this.fc.pending
+      }
+    };
+  };
+
+  MP.Link = Link;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/40_video.js | sha256=8dcd8b2ab3347e2a81dd8d707c95f0407b49e61efebf18c7c9659f220b568f0f | generated by tools/build_web.py -->
+<script id="app-video">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · 视频通道（VIDEO / 不可靠，走 IF1 EP 0x83）
+//
+// 设备侧约定（docs/protocol.md §5.2 + 视频工作流补充）：
+//   一条 VIDEO **消息**的 payload = 16 B 视频头 + 编码数据（每消息 ≤ 1008 B 数据）
+//      0   u8  fmt         0=MJPEG 1=RGB565 2=H264
+//      1   u8  flags       bit0 = 关键帧
+//      2   u16 width
+//      4   u16 height
+//      6   u16 fps_num
+//      8   u16 fps_den
+//     10   u32 frame_seq   同一帧的所有分片共用同一个 frame_seq
+//     14   u16 chunk_index 从 0 递增
+//   一**帧** = 多条消息（同一 frame_seq、chunk_index 从 0 连续递增）。
+//
+// 因此本模块做两件事：
+//   ① 消息级：FrameDecoder（12 B 帧头 + CRC） + Assembler（MORE 分片）
+//   ② 帧级：按 frame_seq/chunk_index 重组；MJPEG 用 JPEG 结束符 FF D9 判定"这一帧收全了"，
+//      收到新 frame_seq 时若上一帧没收全 ⇒ 记丢帧并丢弃（**绝不请求重传**，§5.2 冻结策略）。
+//
+// 渲染：`createImageBitmap` + canvas 绘制；**到达即覆盖，不排队**（只保留最新一帧，
+// 解码慢时宁可丢中间帧也不让延迟累积）。画布按容器自适应（ResizeObserver + DPR）。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var WU = MP.WU;
+  var U = MP.util;
+
+  var JPEG_SOI = [0xFF, 0xD8];
+  var JPEG_EOI = [0xFF, 0xD9];
+  var MAX_FRAME_BYTES = 8 * 1024 * 1024;   // 单帧上限（防被坏头骗到无限缓存）
+  var FPS_WINDOW_MS = 2000;                // 统计窗口
+  var FPS_DECODE_GRACE = 0.35;             // 解码滞后补偿 ≤35%，超了就把显示上限压在 1.35×
+
+  function Video(opts) {
+    opts = opts || {};
+    var self = this;
+
+    this.canvas = opts.canvas || null;
+    this.ctx = (this.canvas && this.canvas.getContext) ? this.canvas.getContext('2d') : null;
+    this.onLog = opts.onLog || function () {};
+    this.onStats = opts.onStats || null;
+    this.onFirstFrame = opts.onFirstFrame || null;
+
+    this.decoder = new WU.FrameDecoder();
+    this.asm = new WU.Assembler(WU.CHANNEL.VIDEO, MAX_FRAME_BYTES);
+
+    this.cur = null;              // 正在拼的帧
+    this.lastCompletedSeq = null; // 上一帧完成的 frame_seq
+    this._skipSeq = null;         // 已知残缺的 frame_seq（等它过去）
+    this._pending = null;         // 待解码帧（最新覆盖）
+    this._rendering = false;
+    this._hasFrame = false;
+    this._warnedFmt = {};
+    this._lastWarnMs = 0;
+    this._lastDrawLog = 0;
+
+    this.stats = {
+      messages: 0,
+      messageBytes: 0,
+      foreignFrames: 0,
+      badMessages: 0,
+      framesStarted: 0,
+      framesComplete: 0,
+      framesDecoded: 0,
+      droppedFrames: 0,
+      droppedPartial: 0,
+      dupChunks: 0,
+      gapChunks: 0,
+      decodeErrors: 0,
+      totalBytes: 0,
+      decodeMs: 0,
+      lastDrawMs: 0
+    };
+
+    this._win = [];        // [{t, n}] 完成帧的时间/字节，用于 fps / 码率
+    this.lastHeader = null;
+
+    // 画布自适应
+    this._ro = null;
+    if (this.canvas && root.ResizeObserver) {
+      try {
+        this._ro = new root.ResizeObserver(function () { self.redrawLast(); });
+        var wrap = (this.canvas.parentElement || this.canvas);
+        this._ro.observe(wrap);
+      } catch (ignore) { /* 老环境没有就算了，绘制时也会读尺寸 */ }
+    }
+  }
+
+  /* ------------------------------------------------------------ 消息级入口 */
+
+  /** 喂入 IF1 IN 上拿到的原始字节（可能包含多个帧/半帧；0 字节由传输层拦掉） */
+  Video.prototype.feed = function (bytes) {
+    var frames = this.decoder.push(bytes);
+    for (var i = 0; i < frames.length; i++) {
+      var f = frames[i];
+      if (f.channel !== WU.CHANNEL.VIDEO) { this.stats.foreignFrames++; continue; }
+      var msg = this.asm.push(f);
+      if (msg === null) continue;
+      try {
+        this._onMessage(msg);
+      } catch (e) {
+        this.stats.badMessages++;
+        this.warn('视频消息解析异常：' + U.errText(e));
+      }
+    }
+  };
+
+  Video.prototype.warn = function (text) {
+    var t = Date.now();
+    if (t - this._lastWarnMs < 1000) return;   // 限流：避免坏流把日志刷爆
+    this._lastWarnMs = t;
+    this.onLog('warn', text);
+  };
+
+  /* ------------------------------------------------------------ 帧级重组 */
+
+  Video.prototype._onMessage = function (payload) {
+    if (payload.length < WU.VIDEO_HDR_LEN) {
+      this.stats.badMessages++;
+      return;
+    }
+    var fmt = payload[0];
+    var kf = payload[1];
+    var w = WU.rd16(payload, 2);
+    var h = WU.rd16(payload, 4);
+    var fn = WU.rd16(payload, 6);
+    var fd = WU.rd16(payload, 8);
+    var seq = WU.rd32(payload, 10);
+    var ci = WU.rd16(payload, 14);
+    var data = payload.subarray(WU.VIDEO_HDR_LEN);
+
+    this.stats.messages++;
+    this.stats.messageBytes += data.length;
+
+    if (!this._warnedFmt[fmt] && fmt !== 0) {
+      this._warnedFmt[fmt] = true;
+      this.warn('收到非 MJPEG 视频（fmt=' + fmt + '）：本页只解码 MJPEG（fmt=0），该路只统计不显示。');
+    }
+
+    // ① 新 frame_seq ⇒ 上一帧结束了
+    if (this.cur && seq !== this.cur.frameSeq) this._finish(false);
+
+    // ② 还没在拼：只接受 chunk_index = 0 的分片
+    if (!this.cur) {
+      if (this._skipSeq === seq && ci !== 0) return;   // 这一帧已知残缺，等它过去
+      if (ci !== 0) {
+        if (this._skipSeq !== seq) {
+          this._skipSeq = seq;
+          this.stats.droppedPartial++;
+        }
+        return;
+      }
+      this._skipSeq = null;
+      this.cur = {
+        frameSeq: seq, fmt: fmt, keyframe: kf, w: w, h: h,
+        fpsNum: fn, fpsDen: fd, nextChunk: 0, parts: [], len: 0
+      };
+      this.stats.framesStarted++;
+    }
+
+    var cur = this.cur;
+    if (!cur || cur.frameSeq !== seq) return;
+
+    // ③ 分片顺序：只接受"正好下一片"；重复片忽略；跳片 ⇒ 整帧作废（等下一个 frame_seq）
+    if (ci < cur.nextChunk) { this.stats.dupChunks++; return; }
+    if (ci > cur.nextChunk) {
+      this.stats.gapChunks++;
+      this._skipSeq = seq;
+      this._abortPartial();
+      return;
+    }
+
+    var nextLen = cur.len + data.length;
+    if (nextLen > MAX_FRAME_BYTES) {
+      this._skipSeq = seq;
+      this._abortPartial();
+      this.warn('单帧累计超过 ' + MAX_FRAME_BYTES + ' B，判定为坏流并丢弃该帧');
+      return;
+    }
+    if (data.length) cur.parts.push(data);
+    cur.len = nextLen;
+    cur.nextChunk++;
+
+    // ④ 完整性判定：MJPEG 以 FF D9 收尾；其它格式只能等下一个 frame_seq
+    if (fmt === 0 && cur.len >= 4 && data.length >= 2 && U.endsWith(data, JPEG_EOI)) {
+      this._finish(true);
+    }
+  };
+
+  /** 结束当前帧；complete=false 表示没收全（丢帧，不重传） */
+  Video.prototype._finish = function (complete) {
+    var cur = this.cur;
+    if (!cur) return;
+    this.cur = null;
+
+    if (!complete) {
+      this.stats.droppedPartial++;
+      return;
+    }
+
+    var bytes = U.concatBytes(cur.parts);
+    if (!bytes.length) { this.stats.droppedPartial++; return; }
+    // MJPEG 必须真的以 EOI 收尾，否则不能交给解码器（会得到 "broken image"）
+    if (cur.fmt === 0 && !U.endsWith(bytes, JPEG_EOI)) {
+      this.stats.droppedPartial++;
+      return;
+    }
+
+    var now = Date.now();
+    this.stats.framesComplete++;
+    this.stats.totalBytes += bytes.length;
+
+    if (this.lastCompletedSeq !== null) {
+      var gap = (cur.frameSeq - this.lastCompletedSeq - 1) >>> 0;
+      // 合理范围才计丢帧（避免乱序/换号把计数爆掉）
+      if (gap > 0 && gap < 1000000) this.stats.droppedFrames += gap;
+    }
+    this.lastCompletedSeq = cur.frameSeq;
+    this.lastHeader = {
+      fmt: cur.fmt, keyframe: cur.keyframe, w: cur.w, h: cur.h,
+      fpsNum: cur.fpsNum, fpsDen: cur.fpsDen, frameSeq: cur.frameSeq, bytes: bytes.length
+    };
+    this._win.push({ t: now, n: bytes.length });
+    this._pruneWindow(now);
+
+    if (!this._hasFrame) {
+      this._hasFrame = true;
+      if (this.onFirstFrame) {
+        try { this.onFirstFrame(this.lastHeader); } catch (ignore) { /* 回调异常不影响解码 */ }
+      }
+    }
+
+    this._render(bytes, cur);
+  };
+
+  Video.prototype._abortPartial = function () {
+    if (!this.cur) return;
+    this.cur = null;
+    this.stats.droppedPartial++;
+  };
+
+  Video.prototype._pruneWindow = function (now) {
+    var cut = now - FPS_WINDOW_MS;
+    var w = this._win;
+    var drop = 0;
+    while (drop < w.length && w[drop].t < cut) drop++;
+    if (drop) w.splice(0, drop);
+    U.trimArray(w, 4096);
+  };
+
+  /* ------------------------------------------------------------ 解码渲染 */
+
+  /** 最新帧覆盖式渲染：解码慢时丢弃中间的帧，绝不让延迟累积 */
+  Video.prototype._render = function (bytes, meta) {
+    this._pending = { bytes: bytes, meta: meta };
+    if (this._rendering) return;
+    var self = this;
+    this._rendering = true;
+    (async function () {
+      while (self._pending) {
+        var f = self._pending;
+        self._pending = null;
+        if (!root.createImageBitmap) {
+          self.stats.decodeErrors++;
+          self.warn('此环境没有 createImageBitmap（需要 Chrome/Edge 88+）。');
+          break;
+        }
+        var t0 = (root.performance && root.performance.now) ? root.performance.now() : Date.now();
+        try {
+          var blob = new root.Blob([f.bytes], { type: 'image/jpeg' });
+          var bmp = await root.createImageBitmap(blob);
+          self._draw(bmp, f.meta);
+          if (bmp.close) bmp.close();
+          self.stats.framesDecoded++;
+          var t1 = (root.performance && root.performance.now) ? root.performance.now() : Date.now();
+          self.stats.decodeMs = Math.round(t1 - t0);
+        } catch (e) {
+          self.stats.decodeErrors++;
+          if (self.stats.decodeErrors <= 3 || self.stats.decodeErrors % 50 === 0) {
+            self.warn('JPEG 解码失败（第 ' + self.stats.decodeErrors + ' 次，' + f.bytes.length + ' B）：' + U.errText(e));
+          }
+        }
+      }
+      self._rendering = false;
+    })();
+  };
+
+  Video.prototype._draw = function (bmp, meta) {
+    if (!this.ctx || !this.canvas) return;
+    var t0 = (root.performance && root.performance.now) ? root.performance.now() : Date.now();
+    var dpr = root.devicePixelRatio || 1;
+    var cw = this.canvas.clientWidth || this.canvas.width || 640;
+    var ch = this.canvas.clientHeight || this.canvas.height || 360;
+    var pw = Math.max(1, Math.round(cw * dpr));
+    var ph = Math.max(1, Math.round(ch * dpr));
+    if (this.canvas.width !== pw) this.canvas.width = pw;
+    if (this.canvas.height !== ph) this.canvas.height = ph;
+
+    var vw = bmp.width || (meta && meta.w) || 0;
+    var vh = bmp.height || (meta && meta.h) || 0;
+    var ctx = this.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#05070c';
+    ctx.fillRect(0, 0, pw, ph);
+    if (vw > 0 && vh > 0) {
+      var s = Math.min(pw / vw, ph / vh);
+      var dw = Math.max(1, Math.round(vw * s));
+      var dh = Math.max(1, Math.round(vh * s));
+      var dx = Math.round((pw - dw) / 2);
+      var dy = Math.round((ph - dh) / 2);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bmp, dx, dy, dw, dh);
+    }
+    this._lastBitmap = { bmp: bmp, meta: meta, version: (this._lastBitmap ? this._lastBitmap.version + 1 : 1) };
+    var t1 = (root.performance && root.performance.now) ? root.performance.now() : Date.now();
+    this.stats.lastDrawMs = Math.round(t1 - t0);
+  };
+
+  /** 容器尺寸变化时用缓存的重绘（不重新解码） */
+  Video.prototype.redrawLast = function () {
+    if (!this._lastBitmap) return;
+    this._draw(this._lastBitmap.bmp, this._lastBitmap.meta);
+  };
+
+  /** 清空统计（重连时用） */
+  Video.prototype.reset = function () {
+    this.resetStream();
+    var s = this.stats;
+    s.messages = 0; s.messageBytes = 0; s.foreignFrames = 0; s.badMessages = 0;
+    s.framesStarted = 0; s.framesComplete = 0; s.framesDecoded = 0;
+    s.droppedFrames = 0; s.droppedPartial = 0; s.dupChunks = 0; s.gapChunks = 0;
+    s.decodeErrors = 0; s.totalBytes = 0; s.decodeMs = 0; s.lastDrawMs = 0;
+    this._win = [];
+    this.lastHeader = null;
+    this._hasFrame = false;
+    this.lastCompletedSeq = null;
+  };
+
+  /**
+   * 只清"流状态"（解码器 / 拼接中 / 待解码帧），**保留累计统计**。
+   * 用于收到 HELLO（设备会重置自己的 TX 序号，之前的半帧字节已经不可信）时：
+   * 最多丢一帧，但不会把用户看到的累计数字清零。
+   */
+  Video.prototype.resetStream = function () {
+    this.decoder.reset();
+    this.asm.reset();
+    this.cur = null;
+    this._skipSeq = null;
+    this._pending = null;
+    this.lastCompletedSeq = null;
+  };
+
+  /** 给 UI 的统计快照（含 fps / 码率，按时间窗口算） */
+  Video.prototype.snapshot = function () {
+    var now = Date.now();
+    this._pruneWindow(now);
+    var n = this._win.length;
+    var bytes = 0;
+    for (var i = 0; i < this._win.length; i++) bytes += this._win[i].n;
+    var span = FPS_WINDOW_MS / 1000;
+    var fps = n / span;
+    var bytesPerSec = bytes / span;
+    var h = this.lastHeader;
+    return {
+      hasFrame: this._hasFrame,
+      framesDecoded: this.stats.framesDecoded,
+      framesComplete: this.stats.framesComplete,
+      droppedFrames: this.stats.droppedFrames,
+      droppedPartial: this.stats.droppedPartial,
+      decodeErrors: this.stats.decodeErrors,
+      messages: this.stats.messages,
+      avgBytes: this.stats.framesComplete ? Math.round(this.stats.totalBytes / this.stats.framesComplete) : 0,
+      totalBytes: this.stats.totalBytes,
+      fps: fps,
+      bytesPerSec: bytesPerSec,
+      decodeMs: this.stats.decodeMs,
+      lastDrawMs: this.stats.lastDrawMs,
+      header: h,
+      decoderStats: this.decoder.stats,
+      decoderDiag: this.decoder.diagnostics,
+      asmStats: { msgOk: this.asm.stats.msgOk, msgAborted: this.asm.stats.msgAborted }
+    };
+  };
+
+  MP.Video = Video;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/50_files.js | sha256=b6c2ce4fb56e57e7943faddf0ebfd8eefcac24414bba9cc5deffb2d941929209 | generated by tools/build_web.py -->
+<script id="app-files">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · TF 卡文件操作（FILE 通道 / 可靠）
+//
+// FILE 通道的消息格式归 I0（冻结）：
+//   8 B 头 = {u8 op, u8 status, u16 xid, u32 offset} + body
+//   body 语义见 web/file.js 顶部表格（本页与设备侧对齐后的口径）：
+//     LIST_REQ : path\0                    LIST_RSP : N × {u32 size, u8 is_dir, name[256]}（每条 261 B）
+//     OPEN_REQ : u8 mode + path\0          OPEN_RSP : u32 handle, u32 size, u8 is_dir（≥9 B，设备回 9 B）
+//     READ_REQ : u32 handle, u32 length    READ_RSP : 数据（8 B 头里的 offset = 读位置；0 字节 = EOF）
+//     WRITE_REQ: u32 handle + 数据         WRITE_RSP: u32 written
+//     CLOSE_REQ: u32 handle                CLOSE_RSP: 空
+//     DELETE/MKDIR/RENAME 没有独立 RSP：设备**原样回同一个 op**，按 xid 配对
+//
+// ⚠️ 设备侧的 **LIST 分页约定**（Lead 转达、与实现对齐）：
+//   LIST_REQ 的 `offset` 字段 = **起始条目序号**（不是字节偏移）；
+//   单帧最多 3 条（3×261 = 783 B body，8+783 = 791 B ≤ 1024）；
+//   主机按 offset 递增翻页，直到某页 0 条或 < 3 条为止。
+//   本模块的 listAll() 就是这么翻的，并且对"设备忽略 offset、一次给全"的实现做了兼容。
+//
+// 本模块只做"高层语义 + 翻页 + 浏览器侧下载/上传"，协议可靠性全部交给
+// MP.Link 里的 LinkSession / FileClient（xid 配对、超时、重传）。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var WU = MP.WU;
+  var F = MP.FILE;
+  var U = MP.util;
+
+  var LIST_PAGE_ENTRIES = 3;      // 设备侧单帧最多 3 条（约定，见文件头）
+  var MAX_LIST_PAGES = 1024;      // 防御：最多翻 1024 页（≈3000 条）
+  var MAX_LIST_ENTRIES = 20000;   // 防御：单目录条目上限
+
+  /** 路径 → NUL 结尾的 UTF-8 字节（与 web/file.js 内部 pathBytes 同语义） */
+  function pathBytes(path) {
+    var b = WU.utf8ToBytes(String(path === undefined ? '/' : path));
+    for (var i = 0; i < b.length; i++) {
+      if (b[i] === 0) throw new F.FileError('EINVAL', '路径里不允许出现 NUL 字节');
+    }
+    var out = new Uint8Array(b.length + 1);
+    out.set(b, 0);
+    return out;
+  }
+
+  function statusOf(msg) {
+    return F.STATUS_NAME[msg.status] || ('0x' + Number(msg.status).toString(16));
+  }
+
+  function checkStatus(msg, what) {
+    if (msg.status !== WU.STATUS.OK) {
+      throw new F.FileError('ESTATUS',
+        what + ' 返回 ' + statusOf(msg) + '（status=0x' + Number(msg.status).toString(16) + '）', msg.status);
+    }
+    return msg;
+  }
+
+  /* ================================================================== */
+
+  function Files(link, hooks) {
+    this.link = link;
+    this.fc = link.fc;
+    this.hooks = hooks || {};
+    this.stats = {
+      pages: 0, entries: 0, offsetIgnored: false, truncatedTail: 0,
+      uploads: 0, downloads: 0, bytesUp: 0, bytesDown: 0
+    };
+  }
+
+  Files.prototype._progress = function (info) {
+    if (this.hooks.onProgress) {
+      try { this.hooks.onProgress(info); } catch (ignore) { /* 回调异常不影响协议 */ }
+    }
+  };
+
+  /* ------------------------------------------------------------ 列目录 */
+
+  /** 请求一页（最多 3 条）；offset = 起始条目序号 */
+  Files.prototype.listPage = async function (path, offset) {
+    var msg = await this.fc.request(WU.FILE_OP.LIST_REQ, {
+      offset: offset >>> 0,
+      body: pathBytes(path)
+    });
+    checkStatus(msg, 'LIST_REQ ' + path);
+    if (msg.op !== WU.FILE_OP.LIST_RSP && msg.op !== WU.FILE_OP.LIST_REQ) {
+      throw new F.FileError('EPROTO', 'LIST_REQ 期望 LIST_RSP(' + WU.FILE_OP.LIST_RSP + ')，实际 op=' + msg.op);
+    }
+    var r = F.decodeListEntries(msg.body);
+    return { entries: r.entries, truncatedTail: r.truncatedTail, offset: offset, bytes: msg.body.length };
+  };
+
+  /**
+   * 列一个目录的全部条目（按设备分页约定翻页聚合）。
+   *
+   * 终止条件（任一）：
+   *   · 本页 0 条；
+   *   · 本页 < 3 条（最后一页）；
+   *   · 本页 > 3 条（设备没按分页来、一次给全 —— 兼容旧语义，记 offsetIgnored）；
+   *   · 设备忽略 offset（返回与上一页同一批）—— 防御性退出，绝不无限循环。
+   *
+   * @returns {Promise<{entries:Array, pages:number, truncatedTail:number, offsetIgnored:boolean}>}
+   */
+  Files.prototype.listAll = async function (path) {
+    var p = U.normalizePath(path);
+    var all = [];
+    var offset = 0;
+    var pages = 0;
+    var truncatedTail = 0;
+    var offsetIgnored = false;
+    var prevFirst = null;
+
+    for (;;) {
+      var page = await this.listPage(p, offset);
+      pages++;
+      truncatedTail += page.truncatedTail;
+      var ents = page.entries;
+
+      if (!ents.length) break;
+
+      // 防御：设备忽略 offset（同一批反复返回）
+      if (offset > 0 && prevFirst !== null && ents[0].name === prevFirst) {
+        offsetIgnored = true;
+        this.stats.offsetIgnored = true;
+        if (this.hooks.onNotice) {
+          this.hooks.onNotice('设备似乎没有按 offset 翻页（第 ' + pages + ' 页与上一页首条相同），已停止翻页。' +
+            '若目录条目不全，请报 Lead：LIST_REQ 的 offset 需要按"起始条目序号"实现。');
+        }
+        break;
+      }
+      prevFirst = ents[0].name;
+
+      for (var i = 0; i < ents.length; i++) all.push(ents[i]);
+
+      if (all.length > MAX_LIST_ENTRIES) {
+        throw new F.FileError('EIO', '目录 ' + p + ' 条目超过 ' + MAX_LIST_ENTRIES + ' 条，已停止翻页（防跑飞）');
+      }
+      if (ents.length > LIST_PAGE_ENTRIES) {
+        // 设备一次给全（未分页）：已经拿到全部，直接结束
+        offsetIgnored = true;
+        this.stats.offsetIgnored = true;
+        break;
+      }
+      if (ents.length < LIST_PAGE_ENTRIES) break;   // 最后一页
+
+      offset += ents.length;
+      if (pages >= MAX_LIST_PAGES) {
+        throw new F.FileError('EIO', '目录 ' + p + ' 超过 ' + MAX_LIST_PAGES + ' 页，已停止翻页（防跑飞）');
+      }
+    }
+
+    this.stats.pages += pages;
+    this.stats.entries = all.length;
+    this.stats.truncatedTail = truncatedTail;
+    return { entries: all, pages: pages, truncatedTail: truncatedTail, offsetIgnored: offsetIgnored };
+  };
+
+  /* ------------------------------------------------------------ 目录操作 */
+
+  Files.prototype.mkdir = async function (path) {
+    var msg = await this.fc.request(WU.FILE_OP.MKDIR, { body: pathBytes(path) });
+    checkStatus(msg, 'MKDIR ' + path);
+    if (msg.op !== WU.FILE_OP.MKDIR && msg.op !== (0x80 | WU.FILE_OP.MKDIR)) {
+      throw new F.FileError('EPROTO', 'MKDIR 响应 op=' + msg.op + '（约定 = 原样回同一个 op）');
+    }
+    return true;
+  };
+
+  Files.prototype.rename = async function (from, to) {
+    // body = src\0 dst\0（用 web/file.js 导出的权威编码，避免自己拼）
+    var body = F.encodeRenameBody(from, to);
+    var msg = await this.fc.request(WU.FILE_OP.RENAME, { body: body });
+    checkStatus(msg, 'RENAME ' + from + ' → ' + to);
+    if (msg.op !== WU.FILE_OP.RENAME && msg.op !== (0x80 | WU.FILE_OP.RENAME)) {
+      throw new F.FileError('EPROTO', 'RENAME 响应 op=' + msg.op + '（约定 = 原样回同一个 op）');
+    }
+    return true;
+  };
+
+  Files.prototype.remove = async function (path) {
+    var msg = await this.fc.request(WU.FILE_OP.DELETE, { body: pathBytes(path) });
+    checkStatus(msg, 'DELETE ' + path);
+    if (msg.op !== WU.FILE_OP.DELETE && msg.op !== (0x80 | WU.FILE_OP.DELETE)) {
+      throw new F.FileError('EPROTO', 'DELETE 响应 op=' + msg.op + '（约定 = 原样回同一个 op）');
+    }
+    return true;
+  };
+
+  /* ------------------------------------------------------------ 上传下载 */
+
+  /** 读整个文件（OPEN→READ 循环→CLOSE），返回 Uint8Array */
+  Files.prototype.readFile = async function (path, opts) {
+    var self = this;
+    var r = await this.fc.readFile(path, {
+      chunkSize: (opts && opts.chunkSize) || undefined,
+      onProgress: function (p) {
+        self._progress({ phase: 'download', path: path, loaded: p.loaded, total: p.total });
+      }
+    });
+    this.stats.downloads++;
+    this.stats.bytesDown += r.bytes.length;
+    return r;
+  };
+
+  /** 浏览器侧另存为（file:// 下合法：Blob + <a download>，不涉及网络/外部资源） */
+  Files.prototype.saveBytes = function (name, bytes, mime) {
+    var doc = root.document;
+    if (!root.URL || !root.URL.createObjectURL || !doc) {
+      throw new Error('当前环境不支持 Blob 下载（缺 URL.createObjectURL / document）');
+    }
+    var blob = new root.Blob([bytes], { type: mime || 'application/octet-stream' });
+    var url = root.URL.createObjectURL(blob);
+    var a = doc.createElement('a');
+    a.href = url;
+    a.download = name || 'download.bin';
+    a.rel = 'noopener';
+    if (doc.body && doc.body.appendChild) doc.body.appendChild(a);
+    a.click();
+    root.setTimeout(function () {
+      try { if (a.remove) a.remove(); else if (a.parentNode) a.parentNode.removeChild(a); } catch (ignore) { /* 忽略 */ }
+      try { root.URL.revokeObjectURL(url); } catch (ignore) { /* 忽略 */ }
+    }, 10000);
+    return url;
+  };
+
+  /** 下载到浏览器（文件名 = 路径 basename） */
+  Files.prototype.download = async function (path, opts) {
+    var r = await this.readFile(path, opts);
+    var name = U.baseName(path) || 'download.bin';
+    this.saveBytes(name, r.bytes);
+    return { name: name, size: r.bytes.length, bytes: r.bytes };
+  };
+
+  /** 把浏览器 File 对象的内容读成 Uint8Array */
+  function readBrowserFile(file) {
+    if (file && typeof file.arrayBuffer === 'function') {
+      return file.arrayBuffer().then(function (ab) { return new Uint8Array(ab); });
+    }
+    return new Promise(function (resolve, reject) {
+      if (!root.FileReader) { reject(new Error('此环境没有 FileReader，无法读取本地文件')); return; }
+      var fr = new root.FileReader();
+      fr.onload = function () { resolve(new Uint8Array(fr.result)); };
+      fr.onerror = function () { reject(new Error('读取本地文件失败：' + (file && file.name))); };
+      fr.readAsArrayBuffer(file);
+    });
+  }
+
+  /** 上传一个浏览器 File 到设备目录下同名文件 */
+  Files.prototype.upload = async function (dir, file) {
+    var self = this;
+    var name = (file && file.name) || 'upload.bin';
+    if (!U.isValidName(name)) throw new F.FileError('EINVAL', '文件名不合法：' + name);
+    var bytes = await readBrowserFile(file);
+    var target = U.joinPath(dir, name);
+    var written = await this.fc.writeFile(target, bytes, {
+      onProgress: function (p) {
+        self._progress({ phase: 'upload', path: target, written: p.written, total: p.total });
+      }
+    });
+    this.stats.uploads++;
+    this.stats.bytesUp += written;
+    return { path: target, name: name, size: written };
+  };
+
+  /** 写一段数据到文件（供"一键写入 PC2P4.TXT"用） */
+  Files.prototype.writeBytes = async function (path, bytes, label) {
+    var self = this;
+    var written = await this.fc.writeFile(path, bytes, {
+      onProgress: function (p) {
+        self._progress({ phase: label || 'write', path: path, written: p.written, total: p.total });
+      }
+    });
+    this.stats.bytesUp += written;
+    return written;
+  };
+
+  /**
+   * 一键写入 /PC2P4.TXT（内容带时间戳与随机标记），然后**回读校验**。
+   * 这是"PC → P4 共享"最直接的证据：网页写、PC 端 MTP 卷里能打开同一文件。
+   *
+   * @param {string} [dir='/'] 写入目录（默认根目录，便于在 MTP 根卷里一眼看到）
+   */
+  Files.prototype.writeTestFile = async function (dir) {
+    var target = U.joinPath(dir || '/', 'PC2P4.TXT');
+    var stamp = U.fmtStamp();
+    var marker = 'MP4-' + Date.now().toString(36).toUpperCase() + '-' +
+      Math.random().toString(36).slice(2, 8).toUpperCase();
+    var text = [
+      'MeidaP4 · PC → P4 共享写入测试',
+      '================================',
+      '写入时间 (local): ' + stamp,
+      '随机标记 (marker): ' + marker,
+      '来源 (source): web/app.html 单文件版 · WebUSB IF2 · FILE 通道（xid 配对 + 可靠窗口）',
+      '写入方式: OPEN(mode=1 截断) → 分块 WRITE(≤1012 B/帧) → CLOSE，随后回读校验',
+      '',
+      '验证方法：',
+      '  1) 本页「刷新」后应看到 PC2P4.TXT，大小与写入字节数一致；',
+      '  2) PC 端打开资源管理器里的 MeidaP4 MTP 卷（或 SD 卡读卡器），根目录应能打开同一文件；',
+      '  3) 两边内容一致 ⇒ PC 与 P4 的文件级共享成立（不是独占）。',
+      ''
+    ].join('\r\n');
+    var bytes = WU.utf8ToBytes(text);
+
+    this._progress({ phase: 'test-write', path: target, written: 0, total: bytes.length });
+    var written = await this.writeBytes(target, bytes, 'test-write');
+
+    // 回读校验（真正证明"设备侧真的落盘了"，而不是只看 WRITE_RSP）
+    var back = await this.readFile(target);
+    var verified = back.bytes.length === bytes.length;
+    if (verified) {
+      for (var i = 0; i < bytes.length; i++) {
+        if (back.bytes[i] !== bytes[i]) { verified = false; break; }
+      }
+    }
+    this._progress({ phase: 'test-done', path: target, written: written, total: bytes.length });
+    return {
+      path: target,
+      bytes: bytes.length,
+      written: written,
+      readBack: back.bytes.length,
+      verified: verified,
+      marker: marker,
+      stamp: stamp
+    };
+  };
+
+  /**
+   * 把 FILE 通道错误翻译成中文可读提示。
+   *
+   * 设备侧的两种最常见状态必须区分（WS-F 约定）：
+   *   · EBUSY (5)  = TF 卡未挂载（或文件服务忙）；
+   *   · ENOENT (2) = 文件/目录不存在。
+   * 两者给用户看的动作完全不同，混成一句"操作失败"会让现场排障走弯路。
+   */
+  Files.describeError = function (e) {
+    if (!e) return '未知错误';
+    if (e.name === 'ESTATUS') {
+      switch (e.status) {
+        case 5: return '设备回 EBUSY：TF 卡未挂载（或文件服务正忙）。请插好 TF 卡，等设备挂载后再点「刷新」。';
+        case 2: return '设备回 ENOENT：文件/目录不存在（可能已被删除，或路径大小写不一致）。';
+        case 4: return '设备回 ENOSPC：存储空间不足，写入被拒绝。';
+        case 1: return '设备回 EINVAL：参数不合法（路径/句柄/长度不合法）。';
+        case 3: return '设备回 EIO：设备侧 I/O 错误（读写失败）。';
+        case 6: return '设备回 ENOTSUP：设备不支持该操作。';
+        default: return '设备回 ' + (F.STATUS_NAME[e.status] || ('0x' + Number(e.status).toString(16))) +
+          '（status=' + e.status + '）';
+      }
+    }
+    if (e.name === 'ETIMEDOUT') return '超时：设备没有回响应（确认设备端 FILE 服务在跑、链路仍为 up）。';
+    if (e.name === 'EBUSY') return '请求发不出去：链路未 up 或可靠窗口已满，稍后重试。';
+    if (e.name === 'EABORT') return '请求被取消（链路重连或会话重置）。';
+    if (e.name === 'ESTATUS') return U.errText(e);
+    return U.errText(e);
+  };
+
+  /** 列目录时过滤掉 . 与 ..（导航由面包屑/上级按钮负责） */
+  Files.filterNavigational = function (entries) {
+    var out = [];
+    for (var i = 0; i < entries.length; i++) {
+      var n = entries[i].name;
+      if (n === '.' || n === '..' || n === '') continue;
+      out.push(entries[i]);
+    }
+    return out;
+  };
+
+  /** 目录项排序：目录在前，然后按名字（大小写不敏感，稳定） */
+  Files.sortEntries = function (entries) {
+    var arr = entries.slice();
+    arr.sort(function (a, b) {
+      if (!!a.isDir !== !!b.isDir) return a.isDir ? -1 : 1;
+      var an = String(a.name).toLowerCase();
+      var bn = String(b.name).toLowerCase();
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      return 0;
+    });
+    return arr;
+  };
+
+  MP.Files = Files;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/60_ui.js | sha256=77a9249e63cfde4126b2cdb5d170f6ae60bd400aaaf015ffde9f74880496b16e | generated by tools/build_web.py -->
+<script id="app-ui">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · UI（原生 DOM，无框架）
+//
+// 结构：
+//   ┌ 顶栏   连接状态 / 链路状态 / 视频状态 / 连接·断开
+//   ├ 视频   画布 + 分辨率/帧率/码率/平均字节/丢帧/已解码
+//   ├ 状态   TELEM 36 B 定长字段 + 诊断计数器 + 使用步骤
+//   ├ LOG    设备 LOG 通道 + 本地事件（滚动、清屏）
+//   └ 文件   TF 卡浏览器（面包屑 / 翻页列目录 / 下载 / 上传 / 新建目录 / 重命名 / 删除 / 一键写 PC2P4.TXT）
+//
+// 所有对设备数据的显示一律走 textContent（设备给的文件名不参与 HTML 解析）。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP = root.MP || {};
+  var WU = MP.WU;
+  var U = MP.util;
+
+  var MAX_LOG_LINES = 800;
+  var MAX_MSGS = 60;
+  var STATS_PERIOD_MS = 400;
+
+  var S = {
+    usb: null,
+    link: null,
+    video: null,
+    files: null,
+    connected: false,
+    busy: false,          // 连接/断开中
+    filesBusy: false,
+    usbAvailable: false,  // navigator.usb 是否存在（决定「连接设备」按钮可用性）
+    linkUp: false,
+    caps: 0,
+    autoListed: false,
+    cwd: '/',
+    entries: [],
+    selected: null,
+    lastTelem: null,
+    lastFrameAt: 0,
+    lastFrameCount: 0,
+    statsTimer: null,
+    logLines: 0,
+    initialised: false
+  };
+
+  function el(id) { return root.document ? root.document.getElementById(id) : null; }
+  function setText(id, text) { var e = el(id); if (e) e.textContent = String(text); }
+  function setDisabled(id, v) { var e = el(id); if (e) e.disabled = !!v; }
+  function addClass(id, c) { var e = el(id); if (e && e.classList) e.classList.add(c); }
+  function removeClass(id, c) { var e = el(id); if (e && e.classList) e.classList.remove(c); }
+
+  var UI = MP.UI = { state: S };
+
+  /* ================================================================ 日志/提示 */
+
+  UI.log = function (level, text) {
+    var box = el('log');
+    if (!box) return;
+    var doc = root.document;
+    var line = doc.createElement('div');
+    line.className = 'ln ' + (level || 'info');
+    var ts = doc.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = U.fmtClock();
+    line.appendChild(ts);
+    line.appendChild(doc.createTextNode(String(text)));
+    box.appendChild(line);
+    S.logLines++;
+    while (S.logLines > MAX_LOG_LINES && box.firstChild) {
+      box.removeChild(box.firstChild);
+      S.logLines--;
+    }
+    var auto = el('chk-autoscroll');
+    if (!auto || auto.checked) box.scrollTop = box.scrollHeight;
+  };
+
+  UI.toast = function (kind, text) {
+    var box = el('msg-list');
+    if (!box) return;
+    var doc = root.document;
+    var m = doc.createElement('div');
+    m.className = 'm ' + (kind || 'info');
+    var t = doc.createElement('time');
+    t.textContent = U.fmtClock();
+    m.appendChild(t);
+    m.appendChild(doc.createTextNode(String(text)));
+    box.appendChild(m);
+    var kids = box.children || [];
+    while (kids.length > MAX_MSGS && box.firstChild) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  };
+
+  function setPill(id, kind, text) {
+    var e = el(id);
+    if (!e) return;
+    e.className = 'pill' + (kind ? ' ' + kind : '');
+    e.textContent = text;
+  }
+
+  function hex32(n) { return '0x' + Number(n >>> 0).toString(16).toUpperCase().padStart(8, '0'); }
+
+  function capsText(caps) {
+    if (!caps) return '（无能力位）';
+    var out = [];
+    if (caps & WU.CAP.VIDEO_MJPEG) out.push('MJPEG');
+    if (caps & WU.CAP.VIDEO_H264) out.push('H264');
+    if (caps & WU.CAP.FILE) out.push('FILE');
+    if (caps & WU.CAP.LOG) out.push('LOG');
+    if (caps & WU.CAP.TELEM) out.push('TELEM');
+    if (caps & WU.CAP.WIFI) out.push('WIFI');
+    if (caps & WU.CAP.UI_CMD) out.push('UI_CMD');
+    return out.length ? out.join(' · ') : '（无已知能力位）';
+  }
+
+  /* ================================================================ 状态刷新 */
+
+  UI.updateButtons = function () {
+    var fileReady = S.connected && S.linkUp && !!S.files && !S.filesBusy;
+    setDisabled('btn-connect', !S.usbAvailable || S.connected || S.busy);
+    setDisabled('btn-disconnect', !S.connected || S.busy);
+    setDisabled('btn-files-refresh', !fileReady);
+    setDisabled('btn-files-up', !fileReady || S.cwd === '/');
+    setDisabled('btn-newdir', !fileReady);
+    setDisabled('btn-upload', !fileReady);
+    setDisabled('btn-write-test', !fileReady);
+    var hasSel = fileReady && !!S.selected;
+    setDisabled('btn-rename', !hasSel);
+    setDisabled('btn-delete', !hasSel);
+    setDisabled('btn-ping', !(S.connected && S.linkUp));
+  };
+
+  function renderTelem() {
+    var t = S.lastTelem;
+    if (!t) return;
+    setText('t-uptime', U.fmtDuration(t.uptimeMs));
+    setText('t-heap', U.fmtBytes(t.heapFree));
+    setText('t-psram', U.fmtBytes(t.psramFree));
+    setText('t-in', U.fmtBytes(t.usbInBytes));
+    setText('t-out', U.fmtBytes(t.usbOutBytes));
+    setText('t-kbps', U.fmtInt(t.videoKbps) + ' kbps');
+    setText('t-drop', U.fmtInt(t.videoDropped));
+    setText('t-fps', (t.videoFpsX100 / 100).toFixed(1));
+    setText('t-sd', t.sdMounted ? '已挂载' : '未挂载');
+    setText('t-wifi', t.wifiUp ? ('up ' + t.wifiRssi + ' dBm') : (t.wifiRssi ? ('down ' + t.wifiRssi + ' dBm') : 'down'));
+    setText('status-hint', 'TELEM 36 B · 版本 v' + (S.link && S.link.session.deviceVersion !== null
+      ? S.link.session.deviceVersion : '?') + ' · caps ' + capsText(S.caps));
+  }
+
+  function renderVideoStats() {
+    if (!S.video || !S.connected) {
+      setText('v-res', '—'); setText('v-fps', '—'); setText('v-kbps', '—');
+      setText('v-avg', '—'); setText('v-drop', '—'); setText('v-dec', '—');
+      setText('v-hdr', '视频头：—');
+      return;
+    }
+    var v = S.video.snapshot();
+    var h = v.header;
+    setText('v-res', h ? (h.w + '×' + h.h) : '—');
+    setText('v-fps', v.fps > 0 ? v.fps.toFixed(1) : '0.0');
+    setText('v-kbps', U.fmtKbps(v.bytesPerSec));
+    setText('v-avg', v.avgBytes ? U.fmtBytes(v.avgBytes) : '—');
+    setText('v-drop', U.fmtInt(v.droppedFrames));
+    setText('v-dec', U.fmtInt(v.framesDecoded));
+    setText('v-hdr', '视频头：' + (h
+      ? ('fmt=' + h.fmt + ' ' + (h.fmt === 0 ? 'MJPEG' : h.fmt === 1 ? 'RGB565' : 'H264') +
+        ' 关键帧=' + (h.keyframe ? '是' : '否') + ' ' + h.w + '×' + h.h +
+        ' fps=' + (h.fpsDen ? (h.fpsNum / h.fpsDen).toFixed(2) : '?') +
+        ' frame_seq=' + h.frameSeq + ' bytes=' + h.bytes)
+      : '—') +
+      '  · 解码 ' + v.decodeMs + ' ms / 绘制 ' + v.lastDrawMs + ' ms' +
+      '  · 消息 ' + U.fmtInt(v.messages) + ' 条 · 残帧丢弃 ' + U.fmtInt(v.droppedPartial) +
+      ' · 解码失败 ' + U.fmtInt(v.decodeErrors));
+
+    var now = Date.now();
+    if (v.framesComplete > S.lastFrameCount) { S.lastFrameCount = v.framesComplete; S.lastFrameAt = now; }
+    var fresh = S.lastFrameAt && (now - S.lastFrameAt < 1500);
+    var wrap = el('canvas-wrap');
+    if (wrap && wrap.classList) {
+      if (v.hasFrame) wrap.classList.remove('empty');
+      else wrap.classList.add('empty');
+    }
+    if (v.hasFrame) {
+      setPill('pill-video', fresh ? 'ok' : 'warn', fresh ? '视频 出图中' : '视频 无新帧');
+      setText('video-hint', fresh ? ('MJPEG ' + (S.video.lastHeader ? S.video.lastHeader.w + '×' + S.video.lastHeader.h : '') +
+        ' · ' + v.fps.toFixed(1) + ' fps') : '视频通道已连上，但 1.5 s 内没有新帧（设备可能暂停推流）');
+    } else if (S.usb && S.usb.claimed.video) {
+      setPill('pill-video', 'warn', '视频 等首帧');
+      setText('video-hint', '已 claim IF1（视频），等待第一帧…');
+    } else {
+      setPill('pill-video', 'err', '视频 不可用');
+      setText('video-hint', 'IF1（视频）未 claim，只有控制通道可用');
+    }
+  }
+
+  function renderDiagnostics() {
+    var link = S.link ? S.link.snapshot() : null;
+    var usb = S.usb ? S.usb.snapshot() : null;
+    var vid = S.video ? S.video.snapshot() : null;
+    if (!link || !usb) {
+      ['d-frames', 'd-zlp', 'd-crc', 'd-resync', 'd-bad', 'd-retx', 'd-win', 'd-file'].forEach(function (id) {
+        setText(id, '0');
+      });
+      return;
+    }
+    var frames = link.frames + (vid ? vid.decoderStats.frames : 0);
+    setText('d-frames', U.fmtInt(frames));
+    setText('d-zlp', U.fmtInt(usb.zeroLenReads.control + usb.zeroLenReads.video));
+    setText('d-crc', U.fmtInt(link.crcErrors + (vid ? vid.decoderStats.crcErrors : 0)));
+    setText('d-resync', U.fmtInt(link.resyncBytes + (vid ? vid.decoderStats.resyncBytes : 0)));
+    setText('d-bad', U.fmtInt(link.badHeader + (vid && vid.decoderDiag ? vid.decoderDiag.badHeader : 0)));
+    setText('d-retx', U.fmtInt(link.ctrl.retransmits + link.file.retransmits));
+    setText('d-win', U.fmtInt(link.ctrl.unacked + link.file.unacked));
+    setText('d-file', U.fmtInt(link.fileClient.requests) + (link.fileClient.pending ? ('（挂起 ' + link.fileClient.pending + '）') : ''));
+  }
+
+  UI.refreshStats = function () {
+    try {
+      renderTelem();
+      renderVideoStats();
+      renderDiagnostics();
+    } catch (e) {
+      // 统计刷新失败绝不能影响协议/读循环
+      if (!S._statsErrShown) {
+        S._statsErrShown = true;
+        UI.log('warn', '统计面板刷新异常：' + U.errText(e));
+      }
+    }
+  };
+
+  /* ================================================================ 连接生命周期 */
+
+  function hooks() {
+    return {
+      log: function (level, text) { UI.log(level, text); },
+
+      onHello: function (info) {
+        S.caps = info.caps >>> 0;
+        var verOk = (info.version === WU.PROTO_VERSION);
+        UI.log(verOk ? 'ok' : 'warn', '收到 HELLO：协议版本=' + info.version +
+          '（本页实现 v' + WU.PROTO_VERSION + '）caps=' + hex32(S.caps) + ' [' + capsText(S.caps) + ']');
+        if (!verOk) UI.log('warn', '⚠️ 协议版本不一致：帧格式可能对不上，若解析异常请核对 docs/protocol.md');
+        UI.log('ok', '已回 HELLO_ACK（引导帧 seq=0/flags=0，不占可靠窗口）→ 链路 up');
+        S.linkUp = true;
+        setPill('pill-link', 'ok', '链路 up');
+        setText('status-hint', 'caps ' + capsText(S.caps));
+        UI.updateButtons();
+        // 设备主导序号：收到 HELLO 说明设备已重置自己的 TX 序号，
+        // 视频端点上的半帧字节不可再信 —— 丢掉流状态（不动累计统计）。
+        if (S.video) S.video.resetStream();
+        if (!(S.caps & WU.CAP.FILE)) {
+          UI.log('warn', '设备的 caps 里没有 FILE 位：TF 卡文件功能会被设备拒绝（ENOTSUP）。');
+        }
+        // 自动列一次根目录：连上就能看到 TF 卡内容
+        if (!S.autoListed && (S.caps & WU.CAP.FILE)) {
+          S.autoListed = true;
+          UI.refreshDir('/');
+        }
+      },
+
+      onHelloAck: function () { UI.log('info', '收到 HELLO_ACK'); },
+
+      onLink: function (s) {
+        if (s.state === 'up') {
+          S.linkUp = true;
+          setPill('pill-link', 'ok', '链路 up');
+        } else if (s.state === 'link_down') {
+          S.linkUp = false;
+          S.autoListed = false;          // 重连后要重新列一次目录（旧列表可能已失效）
+          setPill('pill-link', 'warn', '链路 重连中');
+          UI.log('warn', '链路 down（' + (s.reason || '3 s 内没有收到任何有效帧') + '）：已清窗口与拼接态。' +
+            '设备会每 2 s 重发 HELLO，收到即自动恢复 —— 无需手动重连。');
+          setText('files-status', '链路断开：文件操作已暂停，等待重连…');
+        } else {
+          S.linkUp = false;
+          setPill('pill-link', 'warn', '链路 等待 HELLO');
+        }
+        UI.updateButtons();
+      },
+
+      onTelem: function (t) {
+        S.lastTelem = t;
+      },
+
+      onLogLine: function (text) {
+        UI.log('dev', '[设备] ' + text);
+      },
+
+      onCtrl: function (text) { UI.log('info', '[CTRL] ' + text); },
+
+      onGap: function (text) { UI.log('warn', text); },
+
+      onPong: function () { /* 手动 ping 的 RTT 由 Link.ping() 统计 */ },
+
+      onUnexpected: function (text) { UI.log('warn', text); }
+    };
+  }
+
+  UI.connect = async function () {
+    if (S.busy) return;
+    if (S.connected) { UI.log('warn', '已经连接了（要重连请先点「断开」）'); return; }
+    S.busy = true;
+    UI.updateButtons();
+    setPill('pill-usb', 'warn', 'USB 连接中…');
+    UI.log('info', '开始连接：requestDevice → open → selectConfiguration → claim IF1/IF2 …');
+
+    var usb = null;
+    try {
+      usb = new MP.Usb({
+        log: function (level, text) { UI.log(level, text); },
+        onDisconnect: function (reason) { UI.onDeviceGone(reason); },
+        onZlp: function (kind, n) {
+          if (n === 1 || n % 128 === 0) {
+            UI.log('info', '收到 0 字节读（ZLP，' + kind + ' 端点，累计 ' + n + ' 次）—— 合法事件，继续读');
+          }
+        }
+      });
+      var res = await usb.connect();
+
+      S.usb = usb;
+      S.video = new MP.Video({
+        canvas: el('video-canvas'),
+        onLog: function (level, text) { UI.log(level, text); },
+        onFirstFrame: function (h) {
+          // 先把占位层摘掉，再让 Video 绘制 —— 否则 canvas 在 display:none 下
+          // clientWidth=0，首帧会被画成 1×1（下一帧才会正常）。
+          removeClass('canvas-wrap', 'empty');
+          UI.log('ok', '收到第一帧视频：' + h.w + '×' + h.h + '，' + h.bytes + ' B，frame_seq=' + h.frameSeq +
+            '（MJPEG → createImageBitmap → canvas）');
+        }
+      });
+      S.link = new MP.Link(usb, hooks());
+      S.files = new MP.Files(S.link, {
+        onProgress: function (p) { showProgress(p); },
+        onNotice: function (text) { UI.log('warn', text); UI.toast('warn', text); }
+      });
+
+      // 端点 → 处理器（两个端点各自独立解码，绝不混流）
+      usb.handlers.control = function (bytes) { S.link.feedControl(bytes); };
+      usb.handlers.video = function (bytes) { S.video.feed(bytes); };
+
+      S.connected = true;
+      S.linkUp = false;
+      S.autoListed = false;
+      S.lastTelem = null;
+      S.lastFrameCount = 0;
+      S.lastFrameAt = 0;
+
+      setPill('pill-usb', 'ok', 'USB 已连接');
+      setPill('pill-link', 'warn', '链路 等 HELLO');
+      S.link.start();
+      S.link.helloHandshake();   // 主动 HELLO_ACK：强制设备 link_up 归零，避免与上一台主机残留序号死锁
+      await usb.startReads();
+
+      if (!res.video.ok) {
+        setPill('pill-video', 'err', '视频 不可用');
+        var hint = (res.video.error && res.video.error.hint) || '';
+        UI.log('err', 'IF1（视频）不可用：' + U.errText(res.video.error));
+        UI.toast('err', 'IF1（视频 EP 0x83）claim 失败，已降级为「仅控制模式」：\n' +
+          'TF 卡文件 / LOG / 遥测可用，画面不可用。\n' + (hint || ''));
+        setText('video-hint', 'IF1 未 claim（固件需包含 IF1 WCID / 拔插一次后重试）');
+      } else {
+        setPill('pill-video', 'warn', '视频 等首帧');
+        setText('video-hint', '已 claim IF1（视频 EP 0x83），等待第一帧…');
+      }
+
+      UI.log('info', '已启动读循环，等待设备发 HELLO（设备每 2 s 重发，收到后本页自动回 HELLO_ACK）…');
+      UI.toast('ok', 'USB 已连接。' + (res.video.ok ? '' : '（视频接口未 claim，见错误提示）'));
+    } catch (e) {
+      UI.log('err', '连接失败：' + U.errText(e));
+      if (e && e.hint) UI.log('err', e.hint);
+      UI.toast('err', '连接失败：' + U.errText(e) + (e && e.hint ? '\n' + e.hint : ''));
+      // 连接中途失败时必须把已经 open()/被 claim 的资源释放掉，
+      // 否则下一次「连接设备」会撞上"设备已被本页占用"（open() 抛错）。
+      if (usb) {
+        try { await usb.close(); } catch (ignore) { /* 尽力而为 */ }
+      }
+      await UI.disconnect(true);
+      setPill('pill-usb', 'err', 'USB 未连接');
+    } finally {
+      S.busy = false;
+      UI.updateButtons();
+    }
+  };
+
+  UI.disconnect = async function (silent) {
+    // 先把状态清空（并保存引用），再 await 关闭：
+    // 这样"断开过程中点连接"不会看到半旧状态，也不会被重复关闭。
+    var usb = S.usb;
+    var link = S.link;
+    S.usb = null;
+    S.link = null;
+    S.video = null;
+    S.files = null;
+    S.connected = false;
+    S.linkUp = false;
+    S.caps = 0;
+    S.autoListed = false;
+    S.entries = [];
+    S.selected = null;
+    S.cwd = '/';
+    S.lastTelem = null;
+    S.lastFrameCount = 0;
+    S.lastFrameAt = 0;
+
+    if (link) { try { link.stop(); } catch (ignore) { /* 忽略 */ } }
+    if (usb) {
+      try { await usb.close(); }
+      catch (e) { UI.log('warn', '关闭设备时异常：' + U.errText(e)); }
+    }
+
+    setPill('pill-usb', '', 'USB 未连接');
+    setPill('pill-link', '', '链路 —');
+    setPill('pill-video', '', '视频 —');
+    setText('status-hint', '等待 HELLO / TELEM（36 B 定长）');
+    setText('files-status', '未连接（或尚未握手）');
+    setText('video-hint', '等待连接…');
+    ['v-res', 'v-fps', 'v-kbps', 'v-avg', 'v-drop', 'v-dec'].forEach(function (id) { setText(id, '—'); });
+    setText('v-hdr', '视频头：—');
+    ['t-uptime', 't-heap', 't-psram', 't-in', 't-out', 't-kbps', 't-drop', 't-fps', 't-sd', 't-wifi']
+      .forEach(function (id) { setText(id, '—'); });
+    renderFileList([]);
+    renderCrumbs();
+    addClass('canvas-wrap', 'empty');
+    UI.updateButtons();
+    if (!silent) UI.log('info', '已断开设备并释放接口');
+  };
+
+  UI.onDeviceGone = function (reason) {
+    if (!S.connected) return;
+    UI.log('err', '设备已断开：' + reason);
+    UI.toast('warn', '设备已断开（拔出/复位）。重新插拔后点「连接设备」。');
+    UI.disconnect(false);
+  };
+
+  /* ================================================================ 文件浏览器 */
+
+  /** FILE 通道错误 → 中文可读提示（EBUSY=卡未挂载 / ENOENT=不存在，两者动作不同） */
+  function fileErr(e) {
+    return (MP.Files && typeof MP.Files.describeError === 'function')
+      ? MP.Files.describeError(e) : U.errText(e);
+  }
+
+  function showProgress(p) {
+    if (!p) return;
+    var names = { upload: '上传', download: '下载', 'test-write': '写入 PC2P4.TXT', 'test-done': '写入完成' };
+    var label = names[p.phase] || p.phase;
+    var cur = 0, total = 0;
+    if (p.phase === 'upload' || p.phase === 'test-write') { cur = p.written || 0; total = p.total || 0; }
+    else if (p.phase === 'download') { cur = p.loaded || 0; total = p.total || 0; }
+    else if (p.phase === 'test-done') { cur = p.written || 0; total = p.total || 0; }
+    var pct = total > 0 ? Math.min(100, Math.round(cur * 100 / total)) : 0;
+    setText('files-status', label + ' ' + (p.path || '') + '：' + U.fmtBytes(cur) +
+      (total ? (' / ' + U.fmtBytes(total) + '（' + pct + '%）') : ''));
+  }
+
+  function renderCrumbs() {
+    var box = el('crumbs');
+    if (!box) return;
+    var doc = root.document;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    var segs = U.splitPath(S.cwd);
+
+    var rootBtn = doc.createElement('button');
+    rootBtn.className = 'crumb';
+    rootBtn.textContent = '/';
+    rootBtn.title = '根目录';
+    rootBtn.addEventListener('click', function () { UI.refreshDir('/'); });
+    box.appendChild(rootBtn);
+
+    var acc = '';
+    for (var i = 0; i < segs.length; i++) {
+      var sep = doc.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '/';
+      box.appendChild(sep);
+      acc += '/' + segs[i];
+      var target = acc;
+      if (i === segs.length - 1) {
+        var cur = doc.createElement('span');
+        cur.className = 'cur';
+        cur.textContent = segs[i];
+        box.appendChild(cur);
+      } else {
+        var b = doc.createElement('button');
+        b.className = 'crumb';
+        b.textContent = segs[i];
+        b.title = target;
+        b.addEventListener('click', (function (t) {
+          return function () { UI.refreshDir(t); };
+        })(target));
+        box.appendChild(b);
+      }
+    }
+  }
+
+  function renderFileList(entries) {
+    var body = el('file-list');
+    if (!body) return;
+    var doc = root.document;
+    while (body.firstChild) body.removeChild(body.firstChild);
+
+    if (!entries || !entries.length) {
+      var tr0 = doc.createElement('tr');
+      var td0 = doc.createElement('td');
+      td0.className = 'empty';
+      td0.colSpan = 4;
+      td0.textContent = S.connected ? (S.linkUp ? '（空目录）' : '链路未 up，暂无内容') : '未连接';
+      tr0.appendChild(td0);
+      body.appendChild(tr0);
+      return;
+    }
+
+    for (var i = 0; i < entries.length; i++) {
+      (function (entry) {
+        var tr = doc.createElement('tr');
+        if (S.selected === entry.name) tr.className = 'selected';
+
+        var tdName = doc.createElement('td');
+        tdName.className = 'name';
+        var ico = doc.createElement('span');
+        ico.className = 'ico' + (entry.isDir ? '' : ' file');
+        ico.textContent = entry.isDir ? '▸' : '·';
+        tdName.appendChild(ico);
+        var nm = doc.createElement('span');
+        nm.className = 'nm';
+        nm.textContent = entry.name;
+        tdName.appendChild(nm);
+        tdName.title = entry.name;
+        tdName.addEventListener('click', function () {
+          if (entry.isDir) UI.refreshDir(U.joinPath(S.cwd, entry.name));
+          else UI.selectEntry(entry.name);
+        });
+        tr.appendChild(tdName);
+
+        var tdSize = doc.createElement('td');
+        tdSize.className = 'num';
+        tdSize.textContent = entry.isDir ? '—' : U.fmtBytes(entry.size);
+        tr.appendChild(tdSize);
+
+        var tdType = doc.createElement('td');
+        tdType.textContent = entry.isDir ? '目录' : '文件';
+        tr.appendChild(tdType);
+
+        var tdAct = doc.createElement('td');
+        tdAct.className = 'act';
+        if (entry.isDir) {
+          var bIn = doc.createElement('button');
+          bIn.className = 'btn tiny';
+          bIn.textContent = '进入';
+          bIn.addEventListener('click', function () { UI.refreshDir(U.joinPath(S.cwd, entry.name)); });
+          tdAct.appendChild(bIn);
+        } else {
+          var bDl = doc.createElement('button');
+          bDl.className = 'btn tiny';
+          bDl.textContent = '下载';
+          bDl.addEventListener('click', function () { UI.downloadEntry(entry.name); });
+          tdAct.appendChild(bDl);
+        }
+        var bSel = doc.createElement('button');
+        bSel.className = 'btn tiny';
+        bSel.textContent = '选择';
+        bSel.addEventListener('click', function () { UI.selectEntry(entry.name); });
+        tdAct.appendChild(bSel);
+        tr.appendChild(tdAct);
+
+        body.appendChild(tr);
+      })(entries[i]);
+    }
+  }
+
+  UI.selectEntry = function (name) {
+    S.selected = (S.selected === name) ? null : name;
+    renderFileList(S.entries);
+    UI.updateButtons();
+  };
+
+  UI.refreshDir = async function (path) {
+    var target = U.normalizePath(path || '/');
+    if (!S.files || !S.connected) { UI.toast('warn', '还没连接设备'); return; }
+    if (!S.linkUp) { setText('files-status', '链路未 up（等 HELLO）'); return; }
+    if (S.filesBusy) return;
+
+    S.filesBusy = true;
+    addClass('files-status', 'busy');
+    UI.updateButtons();
+    setText('files-status', '正在列目录 ' + target + ' …');
+    try {
+      var r = await S.files.listAll(target);
+      S.cwd = target;
+      S.entries = MP.Files.sortEntries(MP.Files.filterNavigational(r.entries));
+      S.selected = null;
+      renderCrumbs();
+      renderFileList(S.entries);
+      setText('files-status', '共 ' + S.entries.length + ' 项 · 翻了 ' + r.pages + ' 页' +
+        (r.offsetIgnored ? '（设备未按 offset 分页，已兼容）' : '') +
+        (r.truncatedTail ? (' · 尾部残片 ' + r.truncatedTail + ' B 已丢弃') : ''));
+      UI.log('info', '列目录 ' + target + '：' + S.entries.length + ' 项（' + r.pages + ' 页）');
+    } catch (e) {
+      S.entries = [];
+      renderFileList([]);
+      setText('files-status', '列目录失败：' + fileErr(e));
+      UI.log('err', '列目录 ' + target + ' 失败：' + fileErr(e));
+      UI.toast('err', '列目录 ' + target + ' 失败：' + fileErr(e));
+    } finally {
+      S.filesBusy = false;
+      removeClass('files-status', 'busy');
+      UI.updateButtons();
+    }
+  };
+
+  UI.downloadEntry = async function (name) {
+    if (!S.files) return;
+    var path = U.joinPath(S.cwd, name);
+    try {
+      UI.log('info', '开始下载 ' + path + ' …');
+      var r = await S.files.download(path);
+      UI.log('ok', '已下载 ' + r.name + '（' + U.fmtBytes(r.size) + '）→ 浏览器下载目录');
+      UI.toast('ok', '已下载 ' + r.name + '（' + U.fmtBytes(r.size) + '）');
+      setText('files-status', '已下载 ' + r.name + '（' + U.fmtBytes(r.size) + '）');
+    } catch (e) {
+      UI.log('err', '下载失败：' + fileErr(e));
+      UI.toast('err', '下载 ' + path + ' 失败：' + fileErr(e));
+      setText('files-status', '下载失败：' + fileErr(e));
+    }
+  };
+
+  function askText(msg, def) {
+    if (typeof root.prompt === 'function') return root.prompt(msg, def);
+    UI.toast('warn', '当前环境没有 prompt()，无法输入名称');
+    return null;
+  }
+
+  function askConfirm(msg) {
+    if (typeof root.confirm === 'function') return !!root.confirm(msg);
+    return true;
+  }
+
+  UI.newDir = async function () {
+    if (!S.files || !S.linkUp) return;
+    var name = askText('新目录名（不含 / 或 \\）', 'NEWDIR');
+    if (name === null) return;
+    name = String(name).trim();
+    if (!U.isValidName(name)) { UI.toast('warn', '目录名不合法：' + name); return; }
+    var target = U.joinPath(S.cwd, name);
+    try {
+      await S.files.mkdir(target);
+      UI.log('ok', '已创建目录 ' + target);
+      UI.toast('ok', '已创建目录 ' + target);
+      await UI.refreshDir(S.cwd);
+    } catch (e) {
+      UI.log('err', '新建目录失败：' + fileErr(e));
+      UI.toast('err', '新建目录 ' + target + ' 失败：' + fileErr(e));
+    }
+  };
+
+  UI.renameEntry = async function () {
+    if (!S.files || !S.linkUp || !S.selected) return;
+    var oldName = S.selected;
+    var newName = askText('把「' + oldName + '」重命名为：', oldName);
+    if (newName === null) return;
+    newName = String(newName).trim();
+    if (!U.isValidName(newName)) { UI.toast('warn', '名字不合法：' + newName); return; }
+    if (newName === oldName) return;
+    var from = U.joinPath(S.cwd, oldName);
+    var to = U.joinPath(S.cwd, newName);
+    try {
+      await S.files.rename(from, to);
+      UI.log('ok', '已重命名 ' + from + ' → ' + to);
+      UI.toast('ok', '已重命名 ' + oldName + ' → ' + newName);
+      await UI.refreshDir(S.cwd);
+    } catch (e) {
+      UI.log('err', '重命名失败：' + fileErr(e));
+      UI.toast('err', '重命名失败：' + fileErr(e));
+    }
+  };
+
+  UI.deleteEntry = async function () {
+    if (!S.files || !S.linkUp || !S.selected) return;
+    var name = S.selected;
+    var path = U.joinPath(S.cwd, name);
+    if (!askConfirm('确定删除「' + path + '」吗？此操作不可撤销。')) return;
+    try {
+      await S.files.remove(path);
+      UI.log('ok', '已删除 ' + path);
+      UI.toast('ok', '已删除 ' + path);
+      S.selected = null;
+      await UI.refreshDir(S.cwd);
+    } catch (e) {
+      UI.log('err', '删除失败：' + fileErr(e));
+      UI.toast('err', '删除 ' + path + ' 失败：' + fileErr(e));
+    }
+  };
+
+  UI.uploadFiles = async function (fileList) {
+    if (!S.files || !S.linkUp || !fileList || !fileList.length) return;
+    for (var i = 0; i < fileList.length; i++) {
+      var f = fileList[i];
+      try {
+        UI.log('info', '上传 ' + f.name + '（' + U.fmtBytes(f.size || 0) + '）→ ' + S.cwd + ' …');
+        var r = await S.files.upload(S.cwd, f);
+        UI.log('ok', '已上传 ' + r.path + '（' + U.fmtBytes(r.size) + '）');
+        UI.toast('ok', '已上传 ' + r.name + '（' + U.fmtBytes(r.size) + '）');
+      } catch (e) {
+        UI.log('err', '上传 ' + (f && f.name) + ' 失败：' + fileErr(e));
+        UI.toast('err', '上传 ' + (f && f.name) + ' 失败：' + fileErr(e));
+      }
+    }
+    await UI.refreshDir(S.cwd);
+  };
+
+  UI.writeTestFile = async function () {
+    if (!S.files || !S.linkUp) return;
+    UI.log('info', '一键写入 /PC2P4.TXT（带时间戳），随后回读逐字节校验 …');
+    setText('files-status', '正在写入 /PC2P4.TXT …');
+    try {
+      var r = await S.files.writeTestFile('/');
+      UI.log(r.verified ? 'ok' : 'warn', '写入 /PC2P4.TXT 完成：写入 ' + r.bytes + ' B（WRITE_RSP 累计 ' + r.written +
+        ' B），回读 ' + r.readBack + ' B，逐字节校验=' + (r.verified ? '通过' : '不一致'));
+      UI.toast(r.verified ? 'ok' : 'err', r.verified
+        ? ('PC→P4 共享写入成功：/PC2P4.TXT（' + r.bytes + ' B，标记 ' + r.marker + '），已回读校验。' +
+           '现在可在 PC 的 MTP 卷里打开同一文件核对。')
+        : ('写入后回读不一致：期望 ' + r.bytes + ' B，回读 ' + r.readBack + ' B。请看日志里的 FILE 事务。'));
+      setText('files-status', '已写入 /PC2P4.TXT（' + r.bytes + ' B）' + (r.verified ? '，回读校验通过' : '，回读校验失败'));
+      await UI.refreshDir('/');
+      S.selected = 'PC2P4.TXT';
+      renderFileList(S.entries);
+      UI.updateButtons();
+    } catch (e) {
+      UI.log('err', '写入 /PC2P4.TXT 失败：' + fileErr(e));
+      UI.toast('err', '写入 /PC2P4.TXT 失败：' + fileErr(e));
+      setText('files-status', '写入失败：' + fileErr(e));
+    }
+  };
+
+  UI.ping = async function () {
+    if (!S.link) return;
+    setText('ping-result', 'PING …');
+    try {
+      var rtt = await S.link.ping(2000);
+      setText('ping-result', 'PONG ' + rtt + ' ms');
+      UI.log('ok', 'PING/PONG 往返 ' + rtt + ' ms');
+    } catch (e) {
+      setText('ping-result', '失败：' + U.errText(e));
+      UI.log('warn', 'PING 失败：' + U.errText(e));
+    }
+  };
+
+  /* ================================================================ 初始化 */
+
+  function on(id, ev, fn) {
+    var e = el(id);
+    if (e && e.addEventListener) e.addEventListener(ev, fn);
+  }
+
+  UI.init = function () {
+    if (S.initialised) return;
+    S.initialised = true;
+
+    var doc = root.document;
+    if (doc && doc.addEventListener) {
+      doc.addEventListener('visibilitychange', function () { if (!doc.hidden) UI.refreshStats(); });
+    }
+
+    on('btn-connect', 'click', function () { UI.connect(); });
+    on('btn-disconnect', 'click', function () { UI.disconnect(false); });
+    on('btn-log-clear', 'click', function () {
+      var box = el('log');
+      if (box) { while (box.firstChild) box.removeChild(box.firstChild); }
+      S.logLines = 0;
+      UI.log('info', '（日志已清屏）');
+    });
+    on('btn-msg-clear', 'click', function () {
+      var box = el('msg-list');
+      if (box) { while (box.firstChild) box.removeChild(box.firstChild); }
+    });
+    on('btn-ping', 'click', function () { UI.ping(); });
+    on('btn-files-refresh', 'click', function () { UI.refreshDir(S.cwd); });
+    on('btn-files-up', 'click', function () { UI.refreshDir(U.parentPath(S.cwd)); });
+    on('btn-newdir', 'click', function () { UI.newDir(); });
+    on('btn-rename', 'click', function () { UI.renameEntry(); });
+    on('btn-delete', 'click', function () { UI.deleteEntry(); });
+    on('btn-write-test', 'click', function () { UI.writeTestFile(); });
+    on('btn-upload', 'click', function () { var i = el('file-input'); if (i && i.click) i.click(); });
+    on('file-input', 'change', function (ev) {
+      var input = (ev && ev.target) || el('file-input');
+      var files = (input && input.files) ? input.files : null;
+      if (files && files.length) UI.uploadFiles(files);
+      if (input) input.value = '';
+    });
+
+    // 环境自检
+    S.usbAvailable = !!(root.navigator && root.navigator.usb);
+    if (!S.usbAvailable) {
+      setPill('pill-usb', 'err', 'USB 不可用');
+      setDisabled('btn-connect', true);
+      UI.log('err', 'navigator.usb 不存在：请用 Chrome / Edge 打开，且页面必须在 file:// 或 http://localhost 等安全上下文。');
+      UI.toast('err', '此浏览器不支持 WebUSB（navigator.usb 不存在）。请用 Chrome / Edge 打开本页；' +
+        'Firefox / Safari 不支持。');
+    } else {
+      UI.log('info', 'WebUSB 可用（navigator.usb 存在）');
+      if (root.navigator.usb.addEventListener) {
+        root.navigator.usb.addEventListener('connect', function (ev) {
+          var d = ev && ev.device;
+          if (d && d.vendorId === MP.Usb.VID && d.productId === MP.Usb.PID) {
+            UI.log('info', '检测到 MeidaP4 接入（VID 303A / PID 4103）：点「连接设备」授权。');
+            UI.toast('info', '检测到 MeidaP4 接入，点「连接设备」开始。');
+          }
+        });
+      }
+      try {
+        root.navigator.usb.getDevices().then(function (list) {
+          if (list && list.length) {
+            UI.log('info', '已授权过 ' + list.length + ' 个 USB 设备（file:// 下授权可能不持久，重连需重新授权）');
+          }
+        }, function () { /* 忽略：某些版本没有 getDevices */ });
+      } catch (ignore) { /* 忽略 */ }
+    }
+
+    if (root.location && root.location.protocol === 'file:') {
+      UI.log('info', '页面以 file:// 打开（安全上下文，WebUSB 可用；但 file:// 下不能加载外部脚本/模块）');
+    }
+
+    // 画布占位
+    addClass('canvas-wrap', 'empty');
+    renderCrumbs();
+    renderFileList([]);
+    UI.updateButtons();
+    UI.log('info', 'MeidaP4 控制台就绪。设备：VID 0x303A / PID 0x4103；' +
+      'IF1=视频(EP 0x83 IN)、IF2=控制(EP 0x84 IN / 0x04 OUT)');
+
+    // 定时刷新统计（400 ms；只读快照，不参与协议）
+    S.statsTimer = root.setInterval(UI.refreshStats, STATS_PERIOD_MS);
+    UI.refreshStats();
+  };
+
+  /** 自检/调试用：把 UI 内部状态清成"未连接"（不碰 DOM 事件） */
+  UI._resetForTest = function () {
+    S.connected = false;
+    S.linkUp = false;
+    S.caps = 0;
+    S.usb = null;
+    S.link = null;
+    S.video = null;
+    S.files = null;
+    S.entries = [];
+    S.selected = null;
+    S.cwd = '/';
+  };
+
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<!-- @source web/app_src/js/90_boot.js | sha256=111b6f8522de62ea3c203f893a9d4bebbd9ba96c0acb6bf02db9aeda41886657 | generated by tools/build_web.py -->
+<script id="app-boot">
+// SPDX-License-Identifier: Apache-2.0
+//
+// MeidaP4 · 单文件网页应用 · 启动
+//
+// 只做一件事：DOM 就绪后调用 MP.UI.init()，并保证"初始化失败"不会白屏 ——
+// 把异常原文显示在页面底部的 #boot-error 里（现场排障时用户能直接截图给 Lead）。
+
+(function (root) {
+  'use strict';
+
+  var MP = root.MP;
+
+  function showFatal(e) {
+    var text = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
+    try {
+      var doc = root.document;
+      var box = doc && doc.getElementById('boot-error');
+      if (box) {
+        box.textContent = '页面初始化失败（page init failed）\n\n' + text;
+        box.style.display = 'block';
+      }
+    } catch (ignore) { /* 连兜底都失败就只剩控制台 */ }
+    try { if (root.console && root.console.error) root.console.error('[MeidaP4] boot failed', e); }
+    catch (ignore) { /* 忽略 */ }
+  }
+
+  function boot() {
+    try {
+      if (!MP || !MP.UI || typeof MP.UI.init !== 'function') {
+        throw new Error('应用模块未就绪（MP.UI.init 缺失）：可能是内联脚本被截断，请用 tools/build_web.py 重新生成 app.html');
+      }
+      MP.UI.init();
+    } catch (e) {
+      showFatal(e);
+    }
+  }
+
+  var doc = root.document;
+  if (doc && doc.readyState === 'loading' && doc.addEventListener) {
+    doc.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  MP.boot = { boot: boot, showFatal: showFatal };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+</body>
+</html>

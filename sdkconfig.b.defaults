@@ -1,0 +1,8 @@
+# =============================================================================
+# 探测模式 B · MTP + Vendor 复合 + WebUSB/WCID
+# 用法：-D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.b.defaults"
+# =============================================================================
+CONFIG_TINYUSB_MTP_ENABLED=y
+CONFIG_PROBE_ENABLE_MTP=y
+CONFIG_TINYUSB_MTP_EP_BUFSIZE=4096
+CONFIG_TINYUSB_MTP_MAX_STORAGES=1

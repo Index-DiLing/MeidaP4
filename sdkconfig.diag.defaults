@@ -1,0 +1,16 @@
+# =============================================================================
+# 一次性诊断配置（不参与常规构建）
+#
+# 用途：排查 "wpdmtp.sys 已绑定、但 Windows 的 WPD 无法访问设备" 的问题——
+#       需要看设备侧到底有没有收到 MTP 命令。
+#
+# 用法：
+#   pwsh -File tools/build.ps1 -Mode b -Slot diag -ExtraDefaults sdkconfig.diag.defaults
+#
+# 原理（已从源码确认）：
+#   CONFIG_TINYUSB_DEBUG_LEVEL -> CFG_TUSB_DEBUG
+#   tinyusb/src/class/mtp/mtp_device.c:42  CFG_TUD_MTP_LOG_LEVEL 默认 = CFG_TUD_LOG_LEVEL = 2
+#   mtp_device.c:127  #if CFG_TUSB_DEBUG >= CFG_TUD_MTP_LOG_LEVEL  → 需要 CFG_TUSB_DEBUG >= 2
+#   于是 TU_LOG_DRV("  MTP %s: %s phase") 这类语句才会打印出 MTP 操作码。
+# =============================================================================
+CONFIG_TINYUSB_DEBUG_LEVEL=2
